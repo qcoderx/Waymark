@@ -1,0 +1,56 @@
+# Waymark API contract
+
+This contract is the handoff boundary between Dev 1 and Dev 2. The OpenAPI schema at
+`/docs` remains authoritative for full field definitions.
+
+## Rider flow
+
+1. `POST /v1/deliveries` creates a resolution session. Phone values use E.164 format;
+   `customer_ref` and `rider_ref` are opaque platform identifiers.
+2. `POST /v1/deliveries/{id}/proxy` reserves a temporary proxy number.
+3. The rider app opens `tel:{proxy_number}`.
+4. `WS /v1/deliveries/{id}/events` replays prior events, then streams new ones.
+5. `GET /v1/deliveries/{id}/guidance` recovers current state after reconnect.
+6. `POST /v1/deliveries/{id}/complete` sends final GPS and outcome.
+
+With `TELEPHONY_PROVIDER=infobip`, Infobip posts Calls API lifecycle events to
+`POST /v1/telephony/infobip/events` and streams PCM16 audio to
+`WS /v1/telephony/infobip/media`. These are provider callbacks; Dev 2 does not call them.
+
+Creating a session with a `destination_key` that Waymark already learned immediately
+stores and emits a `route.reused` guidance event.
+
+## Frozen event envelope
+
+```json
+{
+  "id": "evt_...",
+  "type": "guidance.updated",
+  "delivery_id": "del_...",
+  "call_id": "call_...",
+  "trace_id": "trace_...",
+  "timestamp": "2026-09-10T16:00:00Z",
+  "data": {}
+}
+```
+
+| Event | Meaning | Key data |
+| --- | --- | --- |
+| `call.status` | Call lifecycle changed | `status`, `provider` |
+| `transcript.partial` | Replace the temporary transcript line | `transcript` |
+| `transcript.final` | Append a stable utterance | `transcript`, `speaker`, `confidence` |
+| `landmark.detected` | A spoken landmark and its top candidate | `landmark`, `top_candidate` |
+| `guidance.updated` | Render a confident ordered trail | `guidance`, `processing_latency_ms` |
+| `guidance.uncertain` | Show a visual-confirmation state | `guidance`, `processing_latency_ms` |
+| `delivery.completed` | Delivery outcome saved | outcome fields |
+| `route.learned` | Successful arrival promoted observations | `destination_key`, `confidence` |
+| `route.reused` | A later session received graph guidance | `guidance` |
+| `error` | A pipeline stage failed | `stage`, provider detail |
+
+The socket emits `{"type":"system.ping"}` during idle periods. Clients may ignore it.
+
+## Demo controls
+
+With `DEMO_MODE=true`, `POST /v1/demo/deliveries/{id}/utterances` injects a final
+transcript through the real extraction, grounding, persistence, and event pipeline.
+`POST /v1/demo/run` performs the complete learn-and-reuse story in one call.
