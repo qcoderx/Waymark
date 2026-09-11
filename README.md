@@ -1,15 +1,19 @@
 # Waymark
 
-Waymark turns the phone calls riders already make for directions into reusable,
-machine-navigable addresses. This repository contains the Dev 1 technical core:
-browser and proxy-call routing, live Sahara transcription, landmark extraction, map grounding,
-live guidance events, delivery confirmation, and the Human Address Graph learning loop.
+Waymark is an action layer for two-sided conversations. It listens to both participants,
+understands what they need, reads permitted organizational data, performs approved tasks, and
+shares the result while they are still talking. Delivery navigation is the first vertical;
+customer care and business operations are the second.
 
 ## What works
 
 - Delivery sessions and temporary order-to-proxy mappings
 - Daily private, audio-only WebRTC rooms with separate expiring rider/customer links
 - A responsive Waymark call screen that sends each speaker's microphone to Sahara
+- Bank, telecom, fintech, and business customer-care sessions backed by seeded sandbox data
+- OpenAI Responses function tools for customer lookup, cases, account protection, and invoices
+- Confirmation-gated sensitive actions with a durable action and conversation audit trail
+- Downloadable PDF invoices persisted in PostgreSQL and visible to both call participants
 - Twilio Programmable Voice rider/customer bridging and two-track Media Streams
 - Twilio signature verification and 8 kHz mu-law to 16 kHz Sahara conversion
 - Optional Infobip Calls API and per-leg media-streaming integration
@@ -61,9 +65,9 @@ Copy `.env.example` to `.env` and fill in:
    Pidgin-English code-switching model; `yo`, `ig`, and `ha` are also available.
 4. A restricted Mapbox access token with Search Box API access.
 
-For the required comparison benchmark, also bring an OpenAI API key for `whisper-1`
-and an ElevenLabs API key for `scribe_v2`. Those keys are only used by the offline benchmark
-runner, not by live rider guidance.
+The customer-care action agent uses the OpenAI API key. The same key can run `whisper-1` in
+the comparison benchmark; an ElevenLabs key enables the `scribe_v2` benchmark provider.
+Neither provider is used by live delivery guidance.
 
 The browser-call setup is in [docs/DAILY_SETUP.md](docs/DAILY_SETUP.md). Twilio and Infobip
 remain documented as optional phone-network providers in [docs/TWILIO_SETUP.md](docs/TWILIO_SETUP.md)
@@ -92,6 +96,17 @@ main endpoints are:
 | `GET /v1/deliveries/{id}/guidance` | Recover current trail after reconnect |
 | `POST /v1/deliveries/{id}/complete` | Save outcome/final GPS and update graph confidence |
 | `GET /v1/resolve?destination_key=...` | Resolve a learned destination without a call |
+| `GET /v1/care/customers` | Search seeded bank, telecom, fintech, and business customers |
+| `POST /v1/care/sessions` | Start a general action-oriented conversation |
+| `POST /v1/care/sessions/{id}/webrtc` | Create two-sided customer-care or business call links |
+| `POST /v1/care/sessions/{id}/turns` | Process a labeled utterance and execute selected tools |
+| `GET /v1/care/sessions/{id}` | Retrieve the shared timeline, actions, and artifacts |
+| `POST /v1/care/actions/{id}/confirm` | Confirm a pending sensitive action |
+| `GET /v1/care/artifacts/{id}/download` | Download a generated conversation artifact |
+
+The generalized platform boundary and vertical contract are documented in
+[docs/PLATFORM_SCOPE.md](docs/PLATFORM_SCOPE.md). A runnable walkthrough is in
+[docs/CARE_DEMO.md](docs/CARE_DEMO.md).
 
 ## Benchmark
 

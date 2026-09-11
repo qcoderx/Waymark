@@ -16,6 +16,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import __version__
+from .care import (
+    ActionConfirmation,
+    CareAction,
+    CareAgent,
+    CareCallJoin,
+    CareCallLinks,
+    CareCustomer,
+    CareRepository,
+    CareSession,
+    CareSessionCreate,
+    CareTimeline,
+    CareTurnCreate,
+    CareTurnResult,
+    CareVertical,
+    InvoiceCreate,
+)
 from .config import Settings
 from .daily import DailyAPIError, DailyClient, create_access_token, validate_access_token
 from .domain import (
@@ -77,6 +93,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.store = store
         app.state.events = events
         app.state.pipeline = ResolutionPipeline(settings, store, events)
+        app.state.care = CareRepository(store, settings.public_base_url)
+        app.state.care_agent = CareAgent(settings, app.state.care)
         app.state.twilio = TwilioTelephony(settings)
         app.state.infobip = InfobipTelephony(settings)
         app.state.daily = DailyClient(settings)
@@ -85,10 +103,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Waymark Core API",
-        summary="Turn direction calls into reusable, machine-navigable addresses.",
+        summary="Turn shared conversations into useful, auditable actions.",
         description=(
-            "Dev 1 service for delivery sessions, proxy calls, live speech, landmark "
-            "grounding, guidance events, and the Human Address Graph learning loop."
+            "Live two-sided speech, customer-care tools, shared documents, delivery "
+            "guidance, and the Human Address Graph learning loop."
         ),
         version=__version__,
         lifespan=lifespan,
@@ -140,6 +158,293 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         delivery = request.app.state.store.create_delivery(payload)
         await request.app.state.pipeline.reuse_known_route(delivery.id)
         return request.app.state.store.get_delivery(delivery.id)
+
+    @app.get(
+        "/v1/care/customers",
+        response_model=list[CareCustomer],
+        tags=["customer care"],
+    )
+    async def list_care_customers(
+        request: Request,
+        vertical: CareVertical | None = None,
+        query: str | None = Query(default=None, max_length=120),
+    ) -> list[CareCustomer]:
+        return request.app.state.care.list_customers(
+            vertical=vertical.value if vertical else None, query=query
+        )
+
+    @app.get(
+        "/v1/care/customers/{customer_id}",
+        response_model=CareCustomer,
+        tags=["customer care"],
+    )
+    async def get_care_customer(customer_id: str, request: Request) -> CareCustomer:
+        return request.app.state.care.get_customer(customer_id)
+
+    @app.post(
+        "/v1/care/sessions",
+        response_model=CareSession,
+        status_code=201,
+        tags=["customer care"],
+    )
+    async def create_care_session(
+        payload: CareSessionCreate, request: Request
+    ) -> CareSession:
+        return request.app.state.care.create_session(payload)
+
+    @app.get(
+        "/v1/care/sessions/{session_id}",
+        response_model=CareTimeline,
+        tags=["customer care"],
+    )
+    async def get_care_session(session_id: str, request: Request) -> CareTimeline:
+        return request.app.state.care.timeline(session_id)
+
+    @app.post(
+        "/v1/care/sessions/{session_id}/turns",
+        response_model=CareTurnResult,
+        tags=["customer care"],
+    )
+    async def process_care_turn(
+        session_id: str, payload: CareTurnCreate, request: Request
+    ) -> CareTurnResult:
+        return await request.app.state.care_agent.process_turn(session_id, payload)
+
+    @app.post(
+        "/v1/care/sessions/{session_id}/invoices",
+        response_model=CareTurnResult,
+        tags=["customer care"],
+    )
+    async def create_care_invoice(
+        session_id: str, payload: InvoiceCreate, request: Request
+    ) -> CareTurnResult:
+        return request.app.state.care_agent.create_invoice(session_id, payload)
+
+    @app.post(
+        "/v1/care/actions/{action_id}/confirm",
+        response_model=CareAction,
+        tags=["customer care"],
+    )
+    async def confirm_care_action(
+        action_id: str, payload: ActionConfirmation, request: Request
+    ) -> CareAction:
+        return request.app.state.care_agent.confirm(
+            action_id, payload.confirmation_token
+        )
+
+    @app.get("/v1/care/artifacts/{artifact_id}/download", tags=["customer care"])
+    async def download_care_artifact(artifact_id: str, request: Request) -> Response:
+        artifact, content = request.app.state.care.artifact_content(artifact_id)
+        return Response(
+            content=content,
+            media_type=artifact.mime_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{artifact.file_name}"'
+            },
+        )
+
+    def authorize_care_access(
+        session_id: str, role: str, access: str, request_or_websocket: Request | WebSocket
+    ):
+        if not settings.daily_api_key:
+            return None
+        grant = validate_access_token(settings.daily_api_key, access)
+        if not grant or grant.delivery_id != session_id or grant.role != role:
+            return None
+        try:
+            call = request_or_websocket.app.state.care.get_call(grant.call_id)
+        except NotFoundError:
+            return None
+        if call["session_id"] != session_id:
+            return None
+        return grant
+
+    @app.post(
+        "/v1/care/sessions/{session_id}/webrtc",
+        response_model=CareCallLinks,
+        tags=["customer care"],
+    )
+    async def create_care_webrtc_call(
+        session_id: str, request: Request
+    ) -> CareCallLinks:
+        if not request.app.state.daily.configured:
+            raise HTTPException(status_code=503, detail="Daily is not configured")
+        session = request.app.state.care.get_session(session_id)
+        expires_at_unix = int(time.time()) + settings.daily_room_ttl_minutes * 60
+        room_subject = f"care-{session_id}"
+        try:
+            room = await request.app.state.daily.ensure_room(
+                room_subject, expires_at_unix
+            )
+        except DailyAPIError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        call = request.app.state.care.ensure_call(
+            session_id, f"daily:{room['name']}", str(room["url"])
+        )
+        if not settings.daily_api_key:
+            raise HTTPException(status_code=503, detail="DAILY_API_KEY is not configured")
+        roles = (
+            ("employee", "counterparty")
+            if session.vertical == CareVertical.BUSINESS
+            else ("agent", "customer")
+        )
+        base = f"{settings.public_base_url}/care-call/{session_id}"
+        links: dict[str, str] = {}
+        for role in roles:
+            access = create_access_token(
+                settings.daily_api_key,
+                session_id,
+                call["id"],
+                role,
+                expires_at_unix,
+            )
+            links[role] = f"{base}#role={role}&access={access}"
+        return CareCallLinks(
+            session_id=session_id,
+            call_id=call["id"],
+            links=links,
+            expires_at=datetime.fromtimestamp(expires_at_unix, timezone.utc),
+        )
+
+    @app.post(
+        "/v1/care/sessions/{session_id}/webrtc/join",
+        response_model=CareCallJoin,
+        tags=["customer care"],
+    )
+    async def join_care_webrtc_call(
+        session_id: str,
+        request: Request,
+        response: Response,
+        role: str = Query(pattern="^(customer|agent|employee|counterparty)$"),
+    ) -> CareCallJoin:
+        authorization = request.headers.get("authorization", "")
+        access = authorization.removeprefix("Bearer ").strip()
+        grant = authorize_care_access(session_id, role, access, request)
+        if not grant:
+            raise HTTPException(status_code=403, detail="invalid or expired call link")
+        room_name = DailyClient.room_name(f"care-{session_id}")
+        try:
+            meeting_token = await request.app.state.daily.create_meeting_token(
+                room_name,
+                role,
+                f"{role}-{session_id}"[:36],
+                grant.expires_at,
+            )
+        except DailyAPIError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        response.set_cookie(
+            key="waymark_call",
+            value=access,
+            max_age=max(1, grant.expires_at - int(time.time())),
+            httponly=True,
+            secure=settings.public_base_url.startswith("https://"),
+            samesite="strict",
+            path=f"/v1/care/sessions/{session_id}",
+        )
+        return CareCallJoin(
+            room_url=f"https://{settings.daily_domain}.daily.co/{room_name}",
+            meeting_token=meeting_token,
+            audio_websocket_url=(
+                f"{settings.websocket_base_url}/v1/care/sessions/{session_id}"
+                f"/daily-audio/{role}"
+            ),
+            role=role,
+            disclosure=settings.care_disclosure,
+            expires_at=datetime.fromtimestamp(grant.expires_at, timezone.utc),
+        )
+
+    @app.get("/care-call/{session_id}", include_in_schema=False)
+    async def care_call_page(session_id: str, request: Request) -> FileResponse:
+        request.app.state.care.get_session(session_id)
+        return FileResponse(Path(__file__).parent / "static" / "call.html")
+
+    @app.websocket("/v1/care/sessions/{session_id}/daily-audio/{role}")
+    async def care_daily_audio_stream(
+        websocket: WebSocket, session_id: str, role: str
+    ) -> None:
+        access = websocket.cookies.get("waymark_call", "")
+        grant = authorize_care_access(session_id, role, access, websocket)
+        if not grant:
+            await websocket.close(code=4403, reason="invalid or expired call link")
+            return
+        await websocket.accept()
+        stream: SaharaStream | None = None
+        transcript_task: asyncio.Task | None = None
+        agent_tasks: set[asyncio.Task] = set()
+
+        async def receive_segment(active_stream: SaharaStream) -> None:
+            async for message in active_stream.messages():
+                kind = message.get("message_type")
+                if kind == "COMMITTED_TRANSCRIPT":
+                    transcript = message.get("transcript_text", "").strip()
+                    if transcript:
+                        task = asyncio.create_task(
+                            websocket.app.state.care_agent.process_turn(
+                                session_id,
+                                CareTurnCreate(speaker=role, text=transcript),
+                            )
+                        )
+                        agent_tasks.add(task)
+                        task.add_done_callback(agent_tasks.discard)
+                    return
+                if kind in {
+                    "ERROR",
+                    "AUTHENTICATION_ERROR",
+                    "RESOURCE_EXHAUSTED",
+                    "QUOTA_EXCEEDED",
+                    "INSUFFICIENT_AUDIO_ACTIVITY",
+                    "SESSION_TIME_LIMIT_EXCEEDED",
+                }:
+                    return
+
+        async def start_segment() -> None:
+            nonlocal stream, transcript_task
+            if not settings.intron_api_key:
+                return
+            stream = SaharaStream(settings)
+            await stream.connect()
+            transcript_task = asyncio.create_task(receive_segment(stream))
+
+        async def finish_segment() -> None:
+            nonlocal stream, transcript_task
+            active_stream = stream
+            active_task = transcript_task
+            stream = None
+            transcript_task = None
+            if not active_stream:
+                return
+            with contextlib.suppress(Exception):
+                await active_stream.commit()
+            if active_task:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(active_task, timeout=12)
+                if not active_task.done():
+                    active_task.cancel()
+            await active_stream.close()
+
+        try:
+            await start_segment()
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                audio = message.get("bytes")
+                if audio and stream:
+                    await stream.send_pcm16(audio, source_rate=16_000)
+                command = message.get("text")
+                if command == "flush":
+                    await finish_segment()
+                    await start_segment()
+                elif command == "stop":
+                    break
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.exception("customer-care Daily audio stream failed")
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011)
+        finally:
+            await finish_segment()
 
     @app.get("/v1/deliveries", response_model=list[DeliverySession], tags=["deliveries"])
     async def list_deliveries(

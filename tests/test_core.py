@@ -35,6 +35,171 @@ from app.telephony import (
 
 
 class APISmokeTests(unittest.TestCase):
+    def test_customer_care_daily_links_join_shared_action_call(self) -> None:
+        from app.main import create_app
+
+        class FakeDaily:
+            configured = True
+
+            async def ensure_room(self, subject_id: str, expires_at: int) -> dict:
+                return {
+                    "name": f"waymark-{subject_id}",
+                    "url": f"https://waymark-test.daily.co/waymark-{subject_id}",
+                }
+
+            async def create_meeting_token(
+                self, room_name: str, role: str, user_ref: str, expires_at: int
+            ) -> str:
+                return f"care-daily-token-{role}"
+
+        database_path = Path("data") / f"care-daily-test-{uuid.uuid4().hex}.db"
+        settings = replace(
+            Settings.from_env(),
+            database_path=database_path,
+            database_url=None,
+            public_base_url="https://waymark.example",
+            daily_api_key="test-secret",
+            daily_domain="waymark-test",
+            care_agent_enabled=False,
+            demo_mode=False,
+            mapbox_access_token=None,
+            intron_api_key=None,
+        )
+        try:
+            with TestClient(create_app(settings)) as client:
+                client.app.state.daily = FakeDaily()
+                session = client.post(
+                    "/v1/care/sessions",
+                    json={
+                        "vertical": "telecom",
+                        "organization": "Waymark Demo Mobile",
+                        "customer_id": "cust_tel_chidi",
+                        "subject": "Data plan help",
+                    },
+                ).json()
+                response = client.post(
+                    f"/v1/care/sessions/{session['id']}/webrtc"
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                links = response.json()["links"]
+                self.assertEqual(set(links), {"agent", "customer"})
+                agent_access = parse_qs(urlparse(links["agent"]).fragment)["access"][0]
+                join = client.post(
+                    f"/v1/care/sessions/{session['id']}/webrtc/join",
+                    params={"role": "agent"},
+                    headers={"Authorization": f"Bearer {agent_access}"},
+                )
+                self.assertEqual(join.status_code, 200, join.text)
+                self.assertEqual(join.json()["meeting_token"], "care-daily-token-agent")
+                self.assertIn("/v1/care/sessions/", join.json()["audio_websocket_url"])
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database_path) + suffix).unlink(missing_ok=True)
+
+    def test_customer_care_reads_data_and_confirms_sensitive_action(self) -> None:
+        from app.main import create_app
+
+        database_path = Path("data") / f"care-test-{uuid.uuid4().hex}.db"
+        settings = replace(
+            Settings.from_env(),
+            database_path=database_path,
+            database_url=None,
+            demo_mode=True,
+            care_agent_enabled=False,
+            mapbox_access_token=None,
+            intron_api_key=None,
+        )
+        try:
+            with TestClient(create_app(settings)) as client:
+                customers = client.get(
+                    "/v1/care/customers", params={"vertical": "banking"}
+                ).json()
+                self.assertEqual([item["id"] for item in customers], ["cust_bank_amina"])
+                session = client.post(
+                    "/v1/care/sessions",
+                    json={
+                        "vertical": "banking",
+                        "organization": "Waymark Demo Bank",
+                        "customer_id": "cust_bank_amina",
+                        "subject": "Account help",
+                    },
+                ).json()
+                balance = client.post(
+                    f"/v1/care/sessions/{session['id']}/turns",
+                    json={"speaker": "customer", "text": "What is my account balance?"},
+                )
+                self.assertEqual(balance.status_code, 200, balance.text)
+                self.assertIn("485250.75", balance.json()["reply"])
+                freeze = client.post(
+                    f"/v1/care/sessions/{session['id']}/turns",
+                    json={"speaker": "customer", "text": "Freeze my card, it is missing."},
+                ).json()
+                action = freeze["actions"][0]
+                self.assertEqual(action["status"], "pending_confirmation")
+                confirmed = client.post(
+                    f"/v1/care/actions/{action['id']}/confirm",
+                    json={"confirmation_token": action["confirmation_token"]},
+                )
+                self.assertEqual(confirmed.status_code, 200, confirmed.text)
+                self.assertEqual(confirmed.json()["result"]["card_status"], "frozen")
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database_path) + suffix).unlink(missing_ok=True)
+
+    def test_customer_care_creates_downloadable_invoice_pdf(self) -> None:
+        from app.main import create_app
+
+        database_path = Path("data") / f"invoice-test-{uuid.uuid4().hex}.db"
+        settings = replace(
+            Settings.from_env(),
+            database_path=database_path,
+            database_url=None,
+            demo_mode=True,
+            care_agent_enabled=False,
+            public_base_url="https://waymark.example",
+            mapbox_access_token=None,
+            intron_api_key=None,
+        )
+        try:
+            with TestClient(create_app(settings)) as client:
+                session = client.post(
+                    "/v1/care/sessions",
+                    json={
+                        "vertical": "business",
+                        "organization": "Bello Creative Studio",
+                        "customer_id": "cust_biz_kemi",
+                        "subject": "Design invoice",
+                    },
+                ).json()
+                result = client.post(
+                    f"/v1/care/sessions/{session['id']}/invoices",
+                    json={
+                        "seller": "Bello Creative Studio",
+                        "buyer": "Northwind Traders",
+                        "currency": "NGN",
+                        "items": [
+                            {
+                                "description": "Brand identity design",
+                                "quantity": 1,
+                                "unit_price": 350000,
+                            }
+                        ],
+                        "due_date": "2026-09-30",
+                        "notes": "Thank you for your business.",
+                    },
+                )
+                self.assertEqual(result.status_code, 200, result.text)
+                artifact = result.json()["artifacts"][0]
+                download = client.get(
+                    f"/v1/care/artifacts/{artifact['id']}/download"
+                )
+                self.assertEqual(download.status_code, 200)
+                self.assertTrue(download.content.startswith(b"%PDF"))
+                self.assertIn("attachment", download.headers["content-disposition"])
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database_path) + suffix).unlink(missing_ok=True)
+
     def test_daily_links_are_private_and_joinable(self) -> None:
         from app.main import create_app
 

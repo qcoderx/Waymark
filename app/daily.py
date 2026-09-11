@@ -17,6 +17,9 @@ class DailyAPIError(RuntimeError):
     pass
 
 
+CALL_ROLES = {"rider", "customer", "agent", "employee", "counterparty"}
+
+
 @dataclass(frozen=True, slots=True)
 class DailyAccess:
     delivery_id: str
@@ -36,8 +39,8 @@ def _b64decode(value: str) -> bytes:
 def create_access_token(
     secret: str, delivery_id: str, call_id: str, role: str, expires_at: int
 ) -> str:
-    if role not in {"rider", "customer"}:
-        raise ValueError("role must be rider or customer")
+    if role not in CALL_ROLES:
+        raise ValueError("unsupported call role")
     payload = _b64encode(
         json.dumps(
             {"d": delivery_id, "c": call_id, "r": role, "e": expires_at},
@@ -59,7 +62,7 @@ def validate_access_token(secret: str, token: str) -> DailyAccess | None:
         data = json.loads(_b64decode(payload))
         role = str(data["r"])
         expires_at = int(data["e"])
-        if role not in {"rider", "customer"} or expires_at <= int(time.time()):
+        if role not in CALL_ROLES or expires_at <= int(time.time()):
             return None
         return DailyAccess(
             delivery_id=str(data["d"]),
@@ -133,7 +136,13 @@ class DailyClient:
         body = {
             "properties": {
                 "room_name": room_name,
-                "user_name": "Rider" if role == "rider" else "Customer",
+                "user_name": {
+                    "rider": "Rider",
+                    "customer": "Customer",
+                    "agent": "Support agent",
+                    "employee": "Business",
+                    "counterparty": "Counterparty",
+                }.get(role, "Participant"),
                 "user_id": user_ref[:36],
                 "exp": expires_at,
                 "eject_at_token_exp": True,

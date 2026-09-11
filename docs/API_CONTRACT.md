@@ -30,6 +30,24 @@ With `TELEPHONY_PROVIDER=infobip`, Infobip posts Calls API lifecycle events to
 Creating a session with a `destination_key` that Waymark already learned immediately
 stores and emits a `route.reused` guidance event.
 
+## Customer-care and business flow
+
+1. Select a seeded sandbox customer with `GET /v1/care/customers?vertical=banking`.
+2. Create a session with `POST /v1/care/sessions` and attach the customer when applicable.
+3. Create two private participant links with `POST /v1/care/sessions/{id}/webrtc`.
+4. Each call page streams labeled audio to Sahara in short segments. Final segments are sent
+   to the action agent while the conversation remains active.
+5. The agent uses OpenAI Responses function tools to read sandbox data or execute permitted
+   actions. If OpenAI is unavailable, deterministic handling keeps the core demo operational.
+6. Both pages poll `GET /v1/care/sessions/{id}` and display the latest Waymark response and
+   downloadable artifacts.
+7. `freeze_card` and `suspend_line` remain `pending_confirmation` until
+   `POST /v1/care/actions/{id}/confirm` receives their per-action confirmation token.
+
+The initial tool catalog contains `lookup_customer`, `get_customer_profile`,
+`open_support_case`, `freeze_card`, `suspend_line`, and `create_invoice`. Transfers, refunds,
+loans, and identity changes are deliberately outside the sandbox executor.
+
 ## Frozen event envelope
 
 ```json

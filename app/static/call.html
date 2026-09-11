@@ -30,6 +30,10 @@
     .person small { display:block; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; font-size:10px; }
     .person strong { display:block; margin-top:10px; font-size:20px; }
     .person .state { margin-top:8px; color:var(--yellow); font-size:12px; }
+    .assistant-panel { display:none; margin:18px 0 0; padding:16px; color:var(--ink); background:var(--paper); border-top:5px solid var(--lagoon); }
+    .assistant-panel small { color:#54707c; font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+    .assistant-panel p { margin:9px 0 0; font-size:14px; line-height:1.45; }
+    .assistant-panel a { display:inline-block; margin-top:12px; padding:9px 12px; color:var(--ink); background:var(--yellow); font-size:12px; font-weight:900; text-decoration:none; }
     .notice { margin:auto 0 20px; padding-top:32px; color:var(--muted); font-size:12px; line-height:1.55; }
     .controls { display:grid; grid-template-columns:72px 1fr; gap:12px; }
     button { border:0; min-height:64px; font:inherit; font-weight:900; cursor:pointer; transition:transform .16s ease,background .16s ease; }
@@ -55,6 +59,7 @@
       <div class="person"><small>You</small><strong id="you">Caller</strong><div class="state" id="micState">Mic ready</div></div>
       <div class="person"><small>Other side</small><strong id="other">Waiting</strong><div class="state" id="peerState">Not connected</div></div>
     </div>
+    <div class="assistant-panel" id="assistantPanel"><small>Waymark action</small><p id="assistantReply">Listening for a request…</p><div id="artifactLinks"></div></div>
   </section>
   <p class="notice" id="notice">Waymark processes this call to turn spoken landmarks into live delivery guidance. No video is used.</p>
   <div class="controls"><button id="mute" type="button" aria-label="Mute microphone" disabled>◉</button><button id="primary" type="button">Join call</button></div>
@@ -65,9 +70,12 @@
   const params = new URLSearchParams(location.hash.slice(1));
   const role = params.get('role');
   const access = params.get('access');
-  const deliveryId = location.pathname.split('/').filter(Boolean).pop();
-  const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','mute','primary','error'].map(id => [id, document.getElementById(id)]));
-  let call, audioSocket, audioContext, audioProcessor, muted = false, joined = false, captureTrackId;
+  const subjectId = location.pathname.split('/').filter(Boolean).pop();
+  const isCare = location.pathname.startsWith('/care-call/');
+  const apiBase = isCare ? `/v1/care/sessions/${subjectId}` : `/v1/deliveries/${subjectId}`;
+  const roleNames = {rider:'Rider',customer:'Customer',agent:'Support agent',employee:'Business',counterparty:'Counterparty'};
+  const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','mute','primary','error','assistantPanel','assistantReply','artifactLinks'].map(id => [id, document.getElementById(id)]));
+  let call, audioSocket, audioContext, audioProcessor, flushTimer, pollTimer, muted = false, joined = false, captureTrackId;
   const sdk = window.Daily || window.DailyIframe;
 
   function fail(message) { ui.error.textContent = message; ui.error.style.display = 'block'; ui.primary.disabled = false; }
@@ -75,7 +83,7 @@
   function refreshPeople() {
     if (!call) return;
     const peers = Object.values(call.participants()).filter(p => !p.local);
-    ui.other.textContent = peers.length ? (peers[0].user_name || (role === 'rider' ? 'Customer' : 'Rider')) : 'Waiting';
+    ui.other.textContent = peers.length ? (peers[0].user_name || 'Participant') : 'Waiting';
     ui.peerState.textContent = peers.length ? 'Connected' : 'Not connected';
   }
   function pcm16Buffer(input, sourceRate) {
@@ -110,14 +118,24 @@
     if (!track || participant.local || document.getElementById('remote-'+participant.session_id)) return;
     const audio=document.createElement('audio'); audio.id='remote-'+participant.session_id; audio.autoplay=true; audio.playsInline=true; audio.srcObject=new MediaStream([track]); document.body.appendChild(audio); audio.play().catch(()=>{});
   }
+  async function pollCare() {
+    if (!isCare) return;
+    try {
+      const response=await fetch(apiBase); if(!response.ok) return; const timeline=await response.json();
+      const replies=timeline.messages.filter(message=>message.speaker==='waymark');
+      if(replies.length) ui.assistantReply.textContent=replies[replies.length-1].text;
+      ui.artifactLinks.replaceChildren();
+      for(const artifact of timeline.artifacts.slice(-3)) { const link=document.createElement('a'); link.href=artifact.download_url; link.textContent=`Download ${artifact.file_name}`; link.target='_blank'; link.rel='noopener'; ui.artifactLinks.appendChild(link); }
+    } catch(_) {}
+  }
   async function join() {
     if (joined) return leave();
-    if (!role || !access || !['rider','customer'].includes(role)) return fail('This call link is incomplete. Ask for a new Waymark link.');
+    if (!role || !access || !(role in roleNames)) return fail('This call link is incomplete. Ask for a new Waymark link.');
     if (!sdk) return fail('The secure call service could not load. Check your connection and try again.');
     ui.primary.disabled=true; ui.error.style.display='none'; setStatus('Connecting…','Securing the audio room.');
     try {
       const query=new URLSearchParams({role});
-      const response=await fetch(`/v1/deliveries/${encodeURIComponent(deliveryId)}/webrtc/join?${query}`,{method:'POST',headers:{Authorization:`Bearer ${access}`}});
+      const response=await fetch(`${apiBase}/webrtc/join?${query}`,{method:'POST',headers:{Authorization:`Bearer ${access}`}});
       if (!response.ok) throw new Error((await response.json()).detail || 'Call setup failed');
       const session=await response.json(); ui.notice.textContent=session.disclosure+' No video is used.';
       call=sdk.createCallObject({videoSource:false,audioSource:true});
@@ -126,19 +144,21 @@
       call.on('network-quality-change', event => { if(event.threshold==='very-low') ui.detail.textContent='Weak connection — stay close to your signal.'; });
       call.on('error', event => fail(event.errorMsg || 'The audio call was interrupted.'));
       await call.join({url:session.room_url,token:session.meeting_token,userName:role==='rider'?'Rider':'Customer'});
-      joined=true; ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=role==='rider'?'Rider direction line':'Customer direction line'; ui.you.textContent=role==='rider'?'Rider':'Customer'; setStatus('Call connected','Speak naturally. Waymark is listening for landmarks.',true); refreshPeople();
+      joined=true; ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; setStatus('Call connected',isCare?'Speak naturally. Waymark can answer and act.':'Speak naturally. Waymark is listening for landmarks.',true); refreshPeople();
+      if(isCare) { ui.assistantPanel.style.display='block'; flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},12000); pollTimer=setInterval(pollCare,2500); pollCare(); }
       const local=Object.values(call.participants()).find(p=>p.local); const track=local?.tracks?.audio?.persistentTrack || local?.audioTrack; if(track) captureLocalTrack(track,session.audio_websocket_url);
     } catch(error) { setStatus('Could not connect','Check the link or your network and try again.'); fail(error.message); }
   }
   async function leave() {
     ui.primary.disabled=true;
+    clearInterval(flushTimer); clearInterval(pollTimer);
     try { if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('stop'); audioSocket?.close(); audioProcessor?.disconnect(); await audioContext?.close(); await call?.leave(); call?.destroy(); } catch(_) {}
     joined=false; ui.primary.disabled=false; ui.primary.textContent='Call ended'; ui.primary.classList.remove('hangup'); ui.primary.disabled=true; ui.mute.disabled=true; setStatus('Call ended','You can close this page.');
   }
   ui.primary.addEventListener('click',join);
   ui.mute.addEventListener('click',async()=>{ muted=!muted; await call.setLocalAudio(!muted); ui.micState.textContent=muted?'Muted':'Mic live'; ui.mute.textContent=muted?'×':'◉'; ui.mute.setAttribute('aria-label',muted?'Unmute microphone':'Mute microphone'); });
   addEventListener('pagehide',()=>{ if(joined) leave(); });
-  if (role) { ui.roleLabel.textContent=role==='rider'?'Rider direction line':'Customer direction line'; ui.you.textContent=role==='rider'?'Rider':'Customer'; }
+  if (role) { ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; }
 })();
 </script>
 </body>
