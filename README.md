@@ -2,15 +2,17 @@
 
 Waymark turns the phone calls riders already make for directions into reusable,
 machine-navigable addresses. This repository contains the Dev 1 technical core:
-proxy-call routing, live Sahara transcription, landmark extraction, map grounding,
+browser and proxy-call routing, live Sahara transcription, landmark extraction, map grounding,
 live guidance events, delivery confirmation, and the Human Address Graph learning loop.
 
 ## What works
 
 - Delivery sessions and temporary order-to-proxy mappings
-- Infobip Calls API event handling and rider/customer Dialog bridging
-- Infobip per-leg media streaming with 48 kHz PCM16 to 16 kHz Sahara conversion
-- Optional Twilio webhook and Media Streams fallback
+- Daily private, audio-only WebRTC rooms with separate expiring rider/customer links
+- A responsive Waymark call screen that sends each speaker's microphone to Sahara
+- Twilio Programmable Voice rider/customer bridging and two-track Media Streams
+- Twilio signature verification and 8 kHz mu-law to 16 kHz Sahara conversion
+- Optional Infobip Calls API and per-leg media-streaming integration
 - Intron Sahara streaming STT with buffered chunks, partial transcripts, and final commits
 - Conservative English/Pidgin direction extraction for landmarks, turns, ordinals, distances,
   and relative positions
@@ -51,25 +53,21 @@ Invoke-RestMethod -Method Post `
 
 Copy `.env.example` to `.env` and fill in:
 
-1. A public HTTPS URL that forwards to this service. Waymark derives the secure media
-   WebSocket URL from `PUBLIC_BASE_URL`.
-2. An Infobip API key/base URL, a Calls Configuration, a `VOICE_VIDEO` event subscription,
-   and at least one leased voice-capable number. Route subscription events to
-   `POST {PUBLIC_BASE_URL}/v1/telephony/infobip/events`.
-3. A `MEDIA_STREAMING` configuration targeting the WebSocket form of
-   `{PUBLIC_BASE_URL}/v1/telephony/infobip/media`. Once `PUBLIC_BASE_URL` is public,
-   `python -m app.infobip_setup` creates it and prints the ID to place in
-   `INFOBIP_MEDIA_STREAM_CONFIG_ID`.
-4. An Intron server API key from the Developers tab at `voice.intron.io`. `pcm` is the
+1. A public HTTPS URL for this service. Waymark derives secure call and WebSocket URLs from
+   `PUBLIC_BASE_URL`.
+2. A Daily API key and domain. Set `TELEPHONY_PROVIDER=daily`; Waymark creates a private,
+   two-person, audio-only room for each delivery and returns expiring rider/customer links.
+3. An Intron server API key from the Developers tab at `voice.intron.io`. `pcm` is the
    Pidgin-English code-switching model; `yo`, `ig`, and `ha` are also available.
-5. A restricted Mapbox access token with Search Box API access.
+4. A restricted Mapbox access token with Search Box API access.
 
 For the required comparison benchmark, also bring an OpenAI API key for `whisper-1`
 and an ElevenLabs API key for `scribe_v2`. Those keys are only used by the offline benchmark
 runner, not by live rider guidance.
 
-The exact Infobip account setup and event list are in
-[docs/INFOBIP_SETUP.md](docs/INFOBIP_SETUP.md).
+The browser-call setup is in [docs/DAILY_SETUP.md](docs/DAILY_SETUP.md). Twilio and Infobip
+remain documented as optional phone-network providers in [docs/TWILIO_SETUP.md](docs/TWILIO_SETUP.md)
+and [docs/INFOBIP_SETUP.md](docs/INFOBIP_SETUP.md).
 
 Set `DEMO_MODE=false` for live use. `GET /health` shows every missing production input.
 Keep every credential server-side; none belongs in the rider app.
@@ -82,11 +80,14 @@ main endpoints are:
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /v1/deliveries` | Create a resolution session and reuse known guidance if available |
-| `POST /v1/deliveries/{id}/proxy` | Reserve an order-scoped proxy number |
-| `POST /v1/telephony/infobip/events` | Consume Calls API events and create the rider/customer Dialog |
-| `WS /v1/telephony/infobip/media` | Receive raw Infobip PCM and stream it to Sahara |
-| `POST /v1/telephony/inbound` | Optional Twilio inbound fallback |
-| `WS /v1/media/{call_id}` | Optional Twilio media fallback |
+| `POST /v1/deliveries/{id}/webrtc` | Create private Daily rider/customer call links |
+| `GET /call/{id}#role=...&access=...` | Open the Waymark browser call screen |
+| `WS /v1/deliveries/{id}/daily-audio/{role}` | Stream labeled browser microphone audio to Sahara |
+| `POST /v1/deliveries/{id}/proxy` | Reserve a proxy number when using Twilio or Infobip |
+| `POST /v1/telephony/inbound` | Receive Twilio calls and return bridge/stream TwiML |
+| `WS /v1/media/{call_id}` | Receive both Twilio audio tracks and stream them to Sahara |
+| `POST /v1/telephony/infobip/events` | Optional Infobip Calls API events |
+| `WS /v1/telephony/infobip/media` | Optional Infobip PCM media stream |
 | `WS /v1/deliveries/{id}/events` | Replay and push live rider events |
 | `GET /v1/deliveries/{id}/guidance` | Recover current trail after reconnect |
 | `POST /v1/deliveries/{id}/complete` | Save outcome/final GPS and update graph confidence |

@@ -7,11 +7,21 @@ This contract is the handoff boundary between Dev 1 and Dev 2. The OpenAPI schem
 
 1. `POST /v1/deliveries` creates a resolution session. Phone values use E.164 format;
    `customer_ref` and `rider_ref` are opaque platform identifiers.
-2. `POST /v1/deliveries/{id}/proxy` reserves a temporary proxy number.
-3. The rider app opens `tel:{proxy_number}`.
+2. `POST /v1/deliveries/{id}/webrtc` creates a private Daily room and returns separate
+   expiring `rider_url` and `customer_url` values.
+3. Send the customer URL to the customer and open the rider URL in the rider app or browser.
 4. `WS /v1/deliveries/{id}/events` replays prior events, then streams new ones.
 5. `GET /v1/deliveries/{id}/guidance` recovers current state after reconnect.
 6. `POST /v1/deliveries/{id}/complete` sends final GPS and outcome.
+
+With `TELEPHONY_PROVIDER=daily`, each URL opens Waymark's audio-only call screen. The screen
+exchanges its browser-only fragment grant for a room-scoped Daily token, joins the two-person room,
+and streams local PCM audio to `WS /v1/deliveries/{id}/daily-audio/{role}` for Sahara. The
+Daily API key never reaches the browser.
+
+With `TELEPHONY_PROVIDER=twilio`, `POST /v1/deliveries/{id}/proxy` reserves a number. Twilio posts the incoming call to
+`POST /v1/telephony/inbound`; Waymark's TwiML bridges the customer and opens the
+two-track media stream at `WS /v1/media/{call_id}`.
 
 With `TELEPHONY_PROVIDER=infobip`, Infobip posts Calls API lifecycle events to
 `POST /v1/telephony/infobip/events` and streams PCM16 audio to

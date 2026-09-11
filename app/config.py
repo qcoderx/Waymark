@@ -52,6 +52,10 @@ class Settings:
     grounding_radius_meters: int
     landmark_freshness_half_life_days: int
     telephony_provider: str
+    daily_api_key: str | None
+    daily_domain: str | None
+    daily_api_base_url: str
+    daily_room_ttl_minutes: int
     twilio_account_sid: str | None
     twilio_auth_token: str | None
     twilio_proxy_numbers: tuple[str, ...]
@@ -105,6 +109,12 @@ class Settings:
                 os.getenv("LANDMARK_FRESHNESS_HALF_LIFE_DAYS", "180")
             ),
             telephony_provider=os.getenv("TELEPHONY_PROVIDER", "twilio"),
+            daily_api_key=os.getenv("DAILY_API_KEY") or None,
+            daily_domain=os.getenv("DAILY_DOMAIN") or None,
+            daily_api_base_url=_https_url(
+                os.getenv("DAILY_API_BASE_URL", "https://api.daily.co/v1")
+            ),
+            daily_room_ttl_minutes=int(os.getenv("DAILY_ROOM_TTL_MINUTES", "60")),
             twilio_account_sid=os.getenv("TWILIO_ACCOUNT_SID") or None,
             twilio_auth_token=os.getenv("TWILIO_AUTH_TOKEN") or None,
             twilio_proxy_numbers=_csv("TWILIO_PROXY_NUMBERS"),
@@ -180,7 +190,14 @@ class Settings:
             "postgres_database": bool(self.database_url),
             "demo_mode_disabled": not self.demo_mode,
         }
-        if self.telephony_provider == "infobip":
+        if self.telephony_provider == "daily":
+            checks.update(
+                {
+                    "daily_credentials": bool(self.daily_api_key),
+                    "daily_domain": bool(self.daily_domain),
+                }
+            )
+        elif self.telephony_provider == "infobip":
             checks.update(
                 {
                     "infobip_credentials": bool(self.infobip_api_key),

@@ -4,16 +4,20 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from . import __version__
 from .config import Settings
+from .daily import DailyAPIError, DailyClient, create_access_token, validate_access_token
 from .domain import (
     CallStatus,
     DeliveryComplete,
@@ -28,6 +32,8 @@ from .domain import (
     ResolveResponse,
     SimulationUtterance,
     WaymarkEvent,
+    WebRTCCallLinks,
+    WebRTCJoin,
 )
 from .events import EventHub
 from .pipeline import ResolutionPipeline
@@ -73,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.pipeline = ResolutionPipeline(settings, store, events)
         app.state.twilio = TwilioTelephony(settings)
         app.state.infobip = InfobipTelephony(settings)
+        app.state.daily = DailyClient(settings)
         yield
         store.close()
 
@@ -149,11 +156,237 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return request.app.state.store.get_delivery(delivery_id)
 
     @app.post(
+        "/v1/deliveries/{delivery_id}/webrtc",
+        response_model=WebRTCCallLinks,
+        tags=["telephony"],
+    )
+    async def create_webrtc_call(delivery_id: str, request: Request) -> WebRTCCallLinks:
+        if settings.telephony_provider != "daily" and not settings.demo_mode:
+            raise HTTPException(status_code=404, detail="Daily WebRTC is disabled")
+        if not request.app.state.daily.configured:
+            raise HTTPException(status_code=503, detail="Daily is not configured")
+        delivery = request.app.state.store.get_delivery(delivery_id)
+        expires_at_unix = int(time.time()) + settings.daily_room_ttl_minutes * 60
+        try:
+            room = await request.app.state.daily.ensure_room(delivery_id, expires_at_unix)
+        except DailyAPIError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        provider_call_id = f"daily:{room['name']}"
+        try:
+            call = request.app.state.store.call_for_provider_id(provider_call_id)
+            call_id = call["id"]
+        except NotFoundError:
+            call_id = request.app.state.store.create_call(
+                delivery_id, "daily", provider_call_id, str(room["url"])
+            )
+        if not settings.daily_api_key:
+            raise HTTPException(status_code=503, detail="DAILY_API_KEY is not configured")
+        tokens = {
+            role: create_access_token(
+                settings.daily_api_key, delivery_id, call_id, role, expires_at_unix
+            )
+            for role in ("rider", "customer")
+        }
+        await request.app.state.events.publish(
+            EventType.CALL_STATUS,
+            delivery_id,
+            {"status": CallStatus.RINGING, "provider": "daily"},
+            call_id=call_id,
+            trace_id=request.state.trace_id,
+        )
+        base = f"{settings.public_base_url}/call/{delivery_id}"
+        return WebRTCCallLinks(
+            delivery_id=delivery.id,
+            call_id=call_id,
+            rider_url=f"{base}#role=rider&access={tokens['rider']}",
+            customer_url=f"{base}#role=customer&access={tokens['customer']}",
+            expires_at=datetime.fromtimestamp(expires_at_unix, timezone.utc),
+        )
+
+    def authorize_daily_access(
+        delivery_id: str, role: str, access: str, request_or_websocket: Request | WebSocket
+    ):
+        if not settings.daily_api_key:
+            return None
+        grant = validate_access_token(settings.daily_api_key, access)
+        if not grant or grant.delivery_id != delivery_id or grant.role != role:
+            return None
+        try:
+            call = request_or_websocket.app.state.store.get_call(grant.call_id)
+        except NotFoundError:
+            return None
+        if call["delivery_id"] != delivery_id or call["provider"] != "daily":
+            return None
+        return grant
+
+    @app.post(
+        "/v1/deliveries/{delivery_id}/webrtc/join",
+        response_model=WebRTCJoin,
+        tags=["telephony"],
+    )
+    async def join_webrtc_call(
+        delivery_id: str,
+        request: Request,
+        response: Response,
+        role: str = Query(pattern="^(rider|customer)$"),
+    ) -> WebRTCJoin:
+        authorization = request.headers.get("authorization", "")
+        access = authorization.removeprefix("Bearer ").strip()
+        grant = authorize_daily_access(delivery_id, role, access, request)
+        if not grant:
+            raise HTTPException(status_code=403, detail="invalid or expired call link")
+        delivery = request.app.state.store.get_private_delivery(delivery_id)
+        room_name = DailyClient.room_name(delivery_id)
+        user_ref = delivery["rider_ref"] if role == "rider" else delivery["customer_ref"]
+        try:
+            meeting_token = await request.app.state.daily.create_meeting_token(
+                room_name, role, user_ref, grant.expires_at
+            )
+        except DailyAPIError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        response.set_cookie(
+            key="waymark_call",
+            value=access,
+            max_age=max(1, grant.expires_at - int(time.time())),
+            httponly=True,
+            secure=settings.public_base_url.startswith("https://"),
+            samesite="strict",
+            path=f"/v1/deliveries/{delivery_id}",
+        )
+        ws_url = f"{settings.websocket_base_url}/v1/deliveries/{delivery_id}/daily-audio/{role}"
+        return WebRTCJoin(
+            room_url=f"https://{settings.daily_domain}.daily.co/{room_name}",
+            meeting_token=meeting_token,
+            audio_websocket_url=ws_url,
+            role=role,
+            disclosure=settings.call_disclosure,
+            expires_at=datetime.fromtimestamp(grant.expires_at, timezone.utc),
+        )
+
+    @app.get("/call/{delivery_id}", include_in_schema=False)
+    async def call_page(delivery_id: str, request: Request) -> FileResponse:
+        request.app.state.store.get_delivery(delivery_id)
+        return FileResponse(Path(__file__).parent / "static" / "call.html")
+
+    @app.websocket("/v1/deliveries/{delivery_id}/daily-audio/{role}")
+    async def daily_audio_stream(
+        websocket: WebSocket, delivery_id: str, role: str
+    ) -> None:
+        access = websocket.cookies.get("waymark_call", "")
+        grant = authorize_daily_access(delivery_id, role, access, websocket)
+        if not grant:
+            await websocket.close(code=4403, reason="invalid or expired call link")
+            return
+        await websocket.accept()
+        store = websocket.app.state.store
+        events: EventHub = websocket.app.state.events
+        pipeline: ResolutionPipeline = websocket.app.state.pipeline
+        trace_id = f"trace_{uuid.uuid4().hex}"
+        stream: SaharaStream | None = None
+        transcript_task: asyncio.Task | None = None
+
+        async def receive_transcripts() -> None:
+            assert stream is not None
+            async for message in stream.messages():
+                kind = message.get("message_type")
+                if kind == "PARTIAL_TRANSCRIPT":
+                    await pipeline.publish_partial(
+                        delivery_id,
+                        message.get("transcript", ""),
+                        call_id=grant.call_id,
+                        trace_id=trace_id,
+                    )
+                elif kind == "COMMITTED_TRANSCRIPT":
+                    transcript = message.get("transcript_text", "").strip()
+                    if transcript:
+                        await pipeline.process_utterance(
+                            delivery_id,
+                            SimulationUtterance(
+                                transcript=transcript,
+                                speaker=role,
+                                confidence=0.88,
+                                timestamp_ms=int(float(message.get("audio_len", 0)) * 1000),
+                                language_mix=[settings.intron_language, "en"],
+                            ),
+                            call_id=grant.call_id,
+                            trace_id=trace_id,
+                        )
+                    return
+                elif kind in {
+                    "ERROR",
+                    "INPUT_ERROR",
+                    "AUTHENTICATION_ERROR",
+                    "RESOURCE_EXHAUSTED",
+                    "QUOTA_EXCEEDED",
+                    "SESSION_TIME_LIMIT_EXCEEDED",
+                }:
+                    await events.publish(
+                        EventType.ERROR,
+                        delivery_id,
+                        {"stage": "stt", "provider": "sahara", "detail": message},
+                        call_id=grant.call_id,
+                        trace_id=trace_id,
+                    )
+                    if kind != "INPUT_ERROR":
+                        return
+
+        try:
+            store.update_call(grant.call_id, CallStatus.CONNECTED, consent_state="disclosed")
+            await events.publish(
+                EventType.CALL_STATUS,
+                delivery_id,
+                {"status": CallStatus.CONNECTED, "provider": "daily", "speaker": role},
+                call_id=grant.call_id,
+                trace_id=trace_id,
+            )
+            if settings.intron_api_key:
+                stream = SaharaStream(settings)
+                await stream.connect()
+                transcript_task = asyncio.create_task(receive_transcripts())
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                audio = message.get("bytes")
+                if audio and stream:
+                    await stream.send_pcm16(audio, source_rate=16_000)
+                if message.get("text") == "stop":
+                    break
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            logger.exception("Daily audio stream failed", extra={"call_id": grant.call_id})
+            await events.publish(
+                EventType.ERROR,
+                delivery_id,
+                {"stage": "media", "provider": "daily", "message": str(exc)},
+                call_id=grant.call_id,
+                trace_id=trace_id,
+            )
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011)
+        finally:
+            if stream:
+                with contextlib.suppress(Exception):
+                    await stream.commit()
+                if transcript_task:
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(transcript_task, timeout=12)
+                    if not transcript_task.done():
+                        transcript_task.cancel()
+                await stream.close()
+
+    @app.post(
         "/v1/deliveries/{delivery_id}/proxy",
         response_model=ProxyAssignment,
         tags=["telephony"],
     )
     async def assign_proxy(delivery_id: str, request: Request) -> ProxyAssignment:
+        if settings.telephony_provider == "daily":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Daily uses POST /v1/deliveries/{delivery_id}/webrtc",
+            )
         numbers = (
             settings.infobip_proxy_numbers
             if settings.telephony_provider == "infobip"

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071a28">
+  <title>Waymark call</title>
+  <script crossorigin src="https://unpkg.com/@daily-co/daily-js@0.90.0"></script>
+  <style>
+    :root { --ink:#071a28; --paper:#f6f1e5; --yellow:#ffc928; --lagoon:#0ca6a0; --muted:#a9b7be; --danger:#e2513f; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100svh; color:var(--paper); background:var(--ink); font-family:"Segoe UI",Arial,sans-serif; overflow-x:hidden; }
+    body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.13; background-image:linear-gradient(115deg,transparent 0 48%,rgba(255,255,255,.22) 49% 50%,transparent 51%),linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px); background-size:150px 150px,100% 28px; }
+    main { position:relative; width:min(100%,520px); min-height:100svh; margin:auto; padding:max(22px,env(safe-area-inset-top)) 22px max(24px,env(safe-area-inset-bottom)); display:flex; flex-direction:column; }
+    header { display:flex; align-items:center; justify-content:space-between; }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
+    .brand-mark { width:28px; height:28px; border:7px solid var(--yellow); border-radius:50% 50% 50% 10%; transform:rotate(-45deg); }
+    .secure { font-size:12px; color:var(--muted); letter-spacing:.08em; }
+    .route { margin:clamp(44px,10vh,88px) 0 0; }
+    .eyebrow { margin:0 0 12px; color:var(--yellow); font-size:12px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; }
+    h1 { margin:0; max-width:430px; font-family:Impact,"Arial Black",sans-serif; font-size:clamp(48px,14vw,78px); line-height:.88; letter-spacing:.01em; text-transform:uppercase; font-weight:900; }
+    h1 span { color:var(--lagoon); }
+    .status-row { margin:28px 0 0; padding:15px 0; display:grid; grid-template-columns:16px 1fr; gap:13px; align-items:center; border-top:1px solid rgba(246,241,229,.2); border-bottom:1px solid rgba(246,241,229,.2); }
+    .pulse { width:12px; height:12px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 5px rgba(169,183,190,.12); }
+    .pulse.live { background:var(--lagoon); box-shadow:0 0 0 5px rgba(12,166,160,.16); animation:pulse 1.8s infinite; }
+    #status { margin:0; font-weight:700; }
+    #detail { margin:3px 0 0; color:var(--muted); font-size:13px; }
+    .people { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:18px 0 0; }
+    .person { padding:16px; min-height:112px; background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.09); }
+    .person small { display:block; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; font-size:10px; }
+    .person strong { display:block; margin-top:10px; font-size:20px; }
+    .person .state { margin-top:8px; color:var(--yellow); font-size:12px; }
+    .notice { margin:auto 0 20px; padding-top:32px; color:var(--muted); font-size:12px; line-height:1.55; }
+    .controls { display:grid; grid-template-columns:72px 1fr; gap:12px; }
+    button { border:0; min-height:64px; font:inherit; font-weight:900; cursor:pointer; transition:transform .16s ease,background .16s ease; }
+    button:active { transform:translateY(2px); }
+    #mute { background:var(--paper); color:var(--ink); font-size:22px; }
+    #primary { background:var(--yellow); color:var(--ink); text-transform:uppercase; letter-spacing:.08em; }
+    #primary.hangup { background:var(--danger); color:white; }
+    button:disabled { cursor:wait; opacity:.6; }
+    #error { display:none; margin-top:12px; padding:12px 14px; color:white; background:rgba(226,81,63,.2); border-left:4px solid var(--danger); font-size:13px; }
+    audio { display:none; }
+    @keyframes pulse { 50% { box-shadow:0 0 0 10px rgba(12,166,160,0); } }
+    @media (prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="brand"><span class="brand-mark"></span>Waymark</div><div class="secure">Private · audio only</div></header>
+  <section class="route">
+    <p class="eyebrow" id="roleLabel">Direction call</p>
+    <h1>Find the <span>last mile.</span></h1>
+    <div class="status-row"><span class="pulse" id="pulse"></span><div><p id="status">Ready to connect</p><p id="detail">Tap join and allow microphone access.</p></div></div>
+    <div class="people">
+      <div class="person"><small>You</small><strong id="you">Caller</strong><div class="state" id="micState">Mic ready</div></div>
+      <div class="person"><small>Other side</small><strong id="other">Waiting</strong><div class="state" id="peerState">Not connected</div></div>
+    </div>
+  </section>
+  <p class="notice" id="notice">Waymark processes this call to turn spoken landmarks into live delivery guidance. No video is used.</p>
+  <div class="controls"><button id="mute" type="button" aria-label="Mute microphone" disabled>◉</button><button id="primary" type="button">Join call</button></div>
+  <div id="error" role="alert"></div>
+</main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const role = params.get('role');
+  const access = params.get('access');
+  const deliveryId = location.pathname.split('/').filter(Boolean).pop();
+  const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','mute','primary','error'].map(id => [id, document.getElementById(id)]));
+  let call, audioSocket, audioContext, audioProcessor, muted = false, joined = false, captureTrackId;
+  const sdk = window.Daily || window.DailyIframe;
+
+  function fail(message) { ui.error.textContent = message; ui.error.style.display = 'block'; ui.primary.disabled = false; }
+  function setStatus(title, detail, live=false) { ui.status.textContent=title; ui.detail.textContent=detail; ui.pulse.classList.toggle('live',live); }
+  function refreshPeople() {
+    if (!call) return;
+    const peers = Object.values(call.participants()).filter(p => !p.local);
+    ui.other.textContent = peers.length ? (peers[0].user_name || (role === 'rider' ? 'Customer' : 'Rider')) : 'Waiting';
+    ui.peerState.textContent = peers.length ? 'Connected' : 'Not connected';
+  }
+  function pcm16Buffer(input, sourceRate) {
+    const ratio = sourceRate / 16000;
+    const count = Math.max(1, Math.floor(input.length / ratio));
+    const output = new ArrayBuffer(count * 2); const view = new DataView(output);
+    for (let i=0;i<count;i++) {
+      const start=Math.floor(i*ratio), end=Math.min(input.length,Math.max(start+1,Math.floor((i+1)*ratio)));
+      let sum=0; for(let j=start;j<end;j++) sum += input[j];
+      const sample=Math.max(-1,Math.min(1,sum/(end-start)));
+      view.setInt16(i*2, sample < 0 ? sample*0x8000 : sample*0x7fff, true);
+    }
+    return output;
+  }
+  async function captureLocalTrack(track, wsUrl) {
+    if (!track || captureTrackId === track.id) return;
+    captureTrackId = track.id;
+    audioSocket = new WebSocket(wsUrl);
+    audioSocket.binaryType = 'arraybuffer';
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    await audioContext.resume();
+    const source = audioContext.createMediaStreamSource(new MediaStream([track]));
+    audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+    const silent = audioContext.createGain(); silent.gain.value = 0;
+    source.connect(audioProcessor); audioProcessor.connect(silent); silent.connect(audioContext.destination);
+    audioProcessor.onaudioprocess = event => {
+      event.outputBuffer.getChannelData(0).fill(0);
+      if (audioSocket.readyState === WebSocket.OPEN && !muted) audioSocket.send(pcm16Buffer(event.inputBuffer.getChannelData(0), audioContext.sampleRate));
+    };
+  }
+  function playRemoteTrack(track, participant) {
+    if (!track || participant.local || document.getElementById('remote-'+participant.session_id)) return;
+    const audio=document.createElement('audio'); audio.id='remote-'+participant.session_id; audio.autoplay=true; audio.playsInline=true; audio.srcObject=new MediaStream([track]); document.body.appendChild(audio); audio.play().catch(()=>{});
+  }
+  async function join() {
+    if (joined) return leave();
+    if (!role || !access || !['rider','customer'].includes(role)) return fail('This call link is incomplete. Ask for a new Waymark link.');
+    if (!sdk) return fail('The secure call service could not load. Check your connection and try again.');
+    ui.primary.disabled=true; ui.error.style.display='none'; setStatus('Connecting…','Securing the audio room.');
+    try {
+      const query=new URLSearchParams({role});
+      const response=await fetch(`/v1/deliveries/${encodeURIComponent(deliveryId)}/webrtc/join?${query}`,{method:'POST',headers:{Authorization:`Bearer ${access}`}});
+      if (!response.ok) throw new Error((await response.json()).detail || 'Call setup failed');
+      const session=await response.json(); ui.notice.textContent=session.disclosure+' No video is used.';
+      call=sdk.createCallObject({videoSource:false,audioSource:true});
+      call.on('track-started', event => { if(event.participant.local && event.track.kind==='audio') captureLocalTrack(event.track,session.audio_websocket_url); else if(event.track.kind==='audio') playRemoteTrack(event.track,event.participant); });
+      call.on('participant-joined', refreshPeople).on('participant-left', refreshPeople).on('participant-updated', refreshPeople);
+      call.on('network-quality-change', event => { if(event.threshold==='very-low') ui.detail.textContent='Weak connection — stay close to your signal.'; });
+      call.on('error', event => fail(event.errorMsg || 'The audio call was interrupted.'));
+      await call.join({url:session.room_url,token:session.meeting_token,userName:role==='rider'?'Rider':'Customer'});
+      joined=true; ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=role==='rider'?'Rider direction line':'Customer direction line'; ui.you.textContent=role==='rider'?'Rider':'Customer'; setStatus('Call connected','Speak naturally. Waymark is listening for landmarks.',true); refreshPeople();
+      const local=Object.values(call.participants()).find(p=>p.local); const track=local?.tracks?.audio?.persistentTrack || local?.audioTrack; if(track) captureLocalTrack(track,session.audio_websocket_url);
+    } catch(error) { setStatus('Could not connect','Check the link or your network and try again.'); fail(error.message); }
+  }
+  async function leave() {
+    ui.primary.disabled=true;
+    try { if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('stop'); audioSocket?.close(); audioProcessor?.disconnect(); await audioContext?.close(); await call?.leave(); call?.destroy(); } catch(_) {}
+    joined=false; ui.primary.disabled=false; ui.primary.textContent='Call ended'; ui.primary.classList.remove('hangup'); ui.primary.disabled=true; ui.mute.disabled=true; setStatus('Call ended','You can close this page.');
+  }
+  ui.primary.addEventListener('click',join);
+  ui.mute.addEventListener('click',async()=>{ muted=!muted; await call.setLocalAudio(!muted); ui.micState.textContent=muted?'Muted':'Mic live'; ui.mute.textContent=muted?'×':'◉'; ui.mute.setAttribute('aria-label',muted?'Unmute microphone':'Mute microphone'); });
+  addEventListener('pagehide',()=>{ if(joined) leave(); });
+  if (role) { ui.roleLabel.textContent=role==='rider'?'Rider direction line':'Customer direction line'; ui.you.textContent=role==='rider'?'Rider':'Customer'; }
+})();
+</script>
+</body>
+</html>

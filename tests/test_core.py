@@ -7,10 +7,12 @@ import unittest
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.daily import create_access_token, validate_access_token
 from app.domain import (
     Coordinate,
     DeliveryComplete,
@@ -33,6 +35,69 @@ from app.telephony import (
 
 
 class APISmokeTests(unittest.TestCase):
+    def test_daily_links_are_private_and_joinable(self) -> None:
+        from app.main import create_app
+
+        class FakeDaily:
+            configured = True
+
+            async def ensure_room(self, delivery_id: str, expires_at: int) -> dict:
+                return {
+                    "name": f"waymark-{delivery_id}",
+                    "url": f"https://waymark-test.daily.co/waymark-{delivery_id}",
+                }
+
+            async def create_meeting_token(
+                self, room_name: str, role: str, user_ref: str, expires_at: int
+            ) -> str:
+                return f"daily-token-{role}"
+
+        database_path = Path("data") / f"daily-test-{uuid.uuid4().hex}.db"
+        settings = replace(
+            Settings.from_env(),
+            database_path=database_path,
+            database_url=None,
+            public_base_url="https://waymark.example",
+            telephony_provider="daily",
+            daily_api_key="test-secret",
+            daily_domain="waymark-test",
+            demo_mode=False,
+            mapbox_access_token=None,
+            intron_api_key=None,
+        )
+        try:
+            with TestClient(create_app(settings)) as client:
+                client.app.state.daily = FakeDaily()
+                delivery = client.post(
+                    "/v1/deliveries",
+                    json={
+                        "external_order_id": "daily-order",
+                        "rider_ref": "rider",
+                        "rider_phone": "+2348011111111",
+                        "customer_ref": "customer",
+                        "customer_phone": "+2348022222222",
+                        "coarse_location": {"lat": 6.5155, "lng": 3.3857},
+                    },
+                ).json()
+                response = client.post(f"/v1/deliveries/{delivery['id']}/webrtc")
+                self.assertEqual(response.status_code, 200, response.text)
+                links = response.json()
+                rider_query = parse_qs(urlparse(links["rider_url"]).fragment)
+                self.assertNotEqual(links["rider_url"], links["customer_url"])
+                join = client.post(
+                    f"/v1/deliveries/{delivery['id']}/webrtc/join",
+                    params={"role": "rider"},
+                    headers={"Authorization": f"Bearer {rider_query['access'][0]}"},
+                )
+                self.assertEqual(join.status_code, 200, join.text)
+                self.assertEqual(join.json()["meeting_token"], "daily-token-rider")
+                self.assertIn("waymark_call=", join.headers["set-cookie"])
+                self.assertIn("HttpOnly", join.headers["set-cookie"])
+                self.assertNotIn("test-secret", response.text + join.text)
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database_path) + suffix).unlink(missing_ok=True)
+
     def test_demo_endpoint_proves_learn_and_reuse(self) -> None:
         from app.main import create_app
 
@@ -183,6 +248,15 @@ class ProviderTests(unittest.TestCase):
         self.assertIn('track="both_tracks"', xml)
         self.assertIn("+2348022222222", xml)
         self.assertIn("Waymark disclosure.", xml)
+
+    def test_daily_audio_access_token_rejects_tampering(self) -> None:
+        token = create_access_token(
+            "secret", "del_123", "call_123", "rider", 4_102_444_800
+        )
+        grant = validate_access_token("secret", token)
+        self.assertIsNotNone(grant)
+        self.assertEqual(grant.role, "rider")
+        self.assertIsNone(validate_access_token("secret", token + "x"))
 
     def test_twilio_signature_validation(self) -> None:
         url = "https://waymark.example/v1/telephony/inbound"

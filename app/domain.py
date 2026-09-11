@@ -103,6 +103,24 @@ class ProxyAssignment(BaseModel):
     expires_at: datetime
 
 
+class WebRTCCallLinks(BaseModel):
+    delivery_id: str
+    call_id: str
+    provider: str = "daily"
+    rider_url: str
+    customer_url: str
+    expires_at: datetime
+
+
+class WebRTCJoin(BaseModel):
+    room_url: str
+    meeting_token: str
+    audio_websocket_url: str
+    role: str
+    disclosure: str
+    expires_at: datetime
+
+
 class Utterance(BaseModel):
     id: str
     call_id: str | None
@@ -226,4 +244,3 @@ class DemoRunResponse(BaseModel):
     learned_guidance: Guidance
     second_delivery: DeliverySession
     reused_guidance: Guidance
-
