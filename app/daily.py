@@ -109,7 +109,11 @@ class DailyClient:
                 "start_audio_off": False,
                 "enable_screenshare": False,
                 "enable_chat": False,
-                "permissions": {"canSend": ["audio"]},
+                "permissions": {
+                    "hasPresence": True,
+                    "canSend": ["audio"],
+                    "canReceive": {"base": True},
+                },
             },
         }
         async with httpx.AsyncClient(timeout=15) as client:
@@ -149,7 +153,11 @@ class DailyClient:
                 "start_video_off": True,
                 "start_audio_off": False,
                 "enable_screenshare": False,
-                "permissions": {"canSend": ["audio"]},
+                "permissions": {
+                    "hasPresence": True,
+                    "canSend": ["audio"],
+                    "canReceive": {"base": True},
+                },
             }
         }
         async with httpx.AsyncClient(timeout=15) as client:

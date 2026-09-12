@@ -41,9 +41,11 @@
     #mute { background:var(--paper); color:var(--ink); font-size:22px; }
     #primary { background:var(--yellow); color:var(--ink); text-transform:uppercase; letter-spacing:.08em; }
     #primary.hangup { background:var(--danger); color:white; }
+    #sound { display:none; grid-column:1/-1; min-height:48px; color:var(--ink); background:var(--lagoon); }
+    #sound.needs-action { display:block; }
     button:disabled { cursor:wait; opacity:.6; }
     #error { display:none; margin-top:12px; padding:12px 14px; color:white; background:rgba(226,81,63,.2); border-left:4px solid var(--danger); font-size:13px; }
-    audio { display:none; }
+    audio { position:fixed; width:1px; height:1px; opacity:.01; pointer-events:none; }
     @keyframes pulse { 50% { box-shadow:0 0 0 10px rgba(12,166,160,0); } }
     @media (prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }
   </style>
@@ -62,7 +64,7 @@
     <div class="assistant-panel" id="assistantPanel"><small>Waymark action</small><p id="assistantReply">Listening for a request…</p><div id="artifactLinks"></div></div>
   </section>
   <p class="notice" id="notice">Waymark processes this call to turn spoken landmarks into live delivery guidance. No video is used.</p>
-  <div class="controls"><button id="mute" type="button" aria-label="Mute microphone" disabled>◉</button><button id="primary" type="button">Join call</button></div>
+  <div class="controls"><button id="sound" type="button">Enable sound</button><button id="mute" type="button" aria-label="Mute microphone" disabled>◉</button><button id="primary" type="button">Join call</button></div>
   <div id="error" role="alert"></div>
 </main>
 <script>
@@ -74,17 +76,22 @@
   const isCare = location.pathname.startsWith('/care-call/');
   const apiBase = isCare ? `/v1/care/sessions/${subjectId}` : `/v1/deliveries/${subjectId}`;
   const roleNames = {rider:'Rider',customer:'Customer',agent:'Support agent',employee:'Business',counterparty:'Counterparty'};
-  const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','mute','primary','error','assistantPanel','assistantReply','artifactLinks'].map(id => [id, document.getElementById(id)]));
+  const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','sound','mute','primary','error','assistantPanel','assistantReply','artifactLinks'].map(id => [id, document.getElementById(id)]));
   let call, audioSocket, audioContext, audioProcessor, flushTimer, pollTimer, muted = false, joined = false, captureTrackId;
   const sdk = window.Daily || window.DailyIframe;
 
   function fail(message) { ui.error.textContent = message; ui.error.style.display = 'block'; ui.primary.disabled = false; }
   function setStatus(title, detail, live=false) { ui.status.textContent=title; ui.detail.textContent=detail; ui.pulse.classList.toggle('live',live); }
+  function remoteParticipants() {
+    return call ? Object.values(call.participants()).filter(participant => !participant.local) : [];
+  }
   function refreshPeople() {
     if (!call) return;
-    const peers = Object.values(call.participants()).filter(p => !p.local);
+    const peers = remoteParticipants();
     ui.other.textContent = peers.length ? (peers[0].user_name || 'Participant') : 'Waiting';
-    ui.peerState.textContent = peers.length ? 'Connected' : 'Not connected';
+    if (!peers.length) ui.peerState.textContent = 'Not connected';
+    else if (document.querySelector('audio[data-remote="true"]')) ui.peerState.textContent = 'Connected · audio ready';
+    else ui.peerState.textContent = 'Connected · waiting for audio';
   }
   function pcm16Buffer(input, sourceRate) {
     const ratio = sourceRate / 16000;
@@ -114,9 +121,40 @@
       if (audioSocket.readyState === WebSocket.OPEN && !muted) audioSocket.send(pcm16Buffer(event.inputBuffer.getChannelData(0), audioContext.sampleRate));
     };
   }
-  function playRemoteTrack(track, participant) {
-    if (!track || participant.local || document.getElementById('remote-'+participant.session_id)) return;
-    const audio=document.createElement('audio'); audio.id='remote-'+participant.session_id; audio.autoplay=true; audio.playsInline=true; audio.srcObject=new MediaStream([track]); document.body.appendChild(audio); audio.play().catch(()=>{});
+  async function startRemotePlayback(audio) {
+    try {
+      await audio.play();
+      ui.sound.classList.remove('needs-action');
+      refreshPeople();
+    } catch (_) {
+      ui.sound.classList.add('needs-action');
+      ui.peerState.textContent = 'Connected · tap Enable sound';
+    }
+  }
+  function syncRemoteAudio(participant, eventTrack=null) {
+    if (!participant || participant.local) return;
+    const track=eventTrack || participant.tracks?.audio?.persistentTrack || participant.audioTrack;
+    if (!track || track.kind !== 'audio' || track.readyState === 'ended') return;
+    let audio=document.getElementById('remote-'+participant.session_id);
+    if (!audio) {
+      audio=document.createElement('audio'); audio.id='remote-'+participant.session_id;
+      audio.dataset.remote='true'; audio.autoplay=true; audio.playsInline=true;
+      audio.setAttribute('playsinline',''); document.body.appendChild(audio);
+    }
+    const current=audio.srcObject?.getAudioTracks?.()[0];
+    if (!current || current.id !== track.id) audio.srcObject=new MediaStream([track]);
+    audio.muted=false; audio.volume=1;
+    startRemotePlayback(audio);
+  }
+  function syncAllRemoteAudio() {
+    remoteParticipants().forEach(participant => syncRemoteAudio(participant));
+    refreshPeople();
+  }
+  function removeRemoteAudio(track) {
+    document.querySelectorAll('audio[data-remote="true"]').forEach(audio => {
+      if (!track || audio.srcObject?.getTracks?.().includes(track)) audio.remove();
+    });
+    refreshPeople();
   }
   async function pollCare() {
     if (!isCare) return;
@@ -139,12 +177,15 @@
       if (!response.ok) throw new Error((await response.json()).detail || 'Call setup failed');
       const session=await response.json(); ui.notice.textContent=session.disclosure+' No video is used.';
       call=sdk.createCallObject({videoSource:false,audioSource:true});
-      call.on('track-started', event => { if(event.participant.local && event.track.kind==='audio') captureLocalTrack(event.track,session.audio_websocket_url); else if(event.track.kind==='audio') playRemoteTrack(event.track,event.participant); });
-      call.on('participant-joined', refreshPeople).on('participant-left', refreshPeople).on('participant-updated', refreshPeople);
+      call.on('track-started', event => { if(event.participant?.local && event.track?.kind==='audio') captureLocalTrack(event.track,session.audio_websocket_url); else if(event.track?.kind==='audio') syncRemoteAudio(event.participant,event.track); });
+      call.on('track-stopped', event => { if(!event.participant?.local) removeRemoteAudio(event.track); });
+      call.on('participant-joined', event => { syncRemoteAudio(event.participant); refreshPeople(); });
+      call.on('participant-updated', event => { syncRemoteAudio(event.participant); refreshPeople(); });
+      call.on('participant-left', () => { removeRemoteAudio(); refreshPeople(); });
       call.on('network-quality-change', event => { if(event.threshold==='very-low') ui.detail.textContent='Weak connection — stay close to your signal.'; });
       call.on('error', event => fail(event.errorMsg || 'The audio call was interrupted.'));
-      await call.join({url:session.room_url,token:session.meeting_token,userName:role==='rider'?'Rider':'Customer'});
-      joined=true; ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; setStatus('Call connected',isCare?'Speak naturally. Waymark can answer and act.':'Speak naturally. Waymark is listening for landmarks.',true); refreshPeople();
+      await call.join({url:session.room_url,token:session.meeting_token,userName:roleNames[role]||'Participant'});
+      joined=true; ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; ui.micState.textContent='Mic live'; setStatus('Call connected',isCare?'Speak naturally. Waymark can answer and act.':'Speak naturally. Waymark is listening for landmarks.',true); syncAllRemoteAudio();
       if(isCare) { ui.assistantPanel.style.display='block'; flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},12000); pollTimer=setInterval(pollCare,2500); pollCare(); }
       const local=Object.values(call.participants()).find(p=>p.local); const track=local?.tracks?.audio?.persistentTrack || local?.audioTrack; if(track) captureLocalTrack(track,session.audio_websocket_url);
     } catch(error) { setStatus('Could not connect','Check the link or your network and try again.'); fail(error.message); }
@@ -156,6 +197,7 @@
     joined=false; ui.primary.disabled=false; ui.primary.textContent='Call ended'; ui.primary.classList.remove('hangup'); ui.primary.disabled=true; ui.mute.disabled=true; setStatus('Call ended','You can close this page.');
   }
   ui.primary.addEventListener('click',join);
+  ui.sound.addEventListener('click',async()=>{ const players=[...document.querySelectorAll('audio[data-remote="true"]')]; await Promise.allSettled(players.map(player=>startRemotePlayback(player))); });
   ui.mute.addEventListener('click',async()=>{ muted=!muted; await call.setLocalAudio(!muted); ui.micState.textContent=muted?'Muted':'Mic live'; ui.mute.textContent=muted?'×':'◉'; ui.mute.setAttribute('aria-label',muted?'Unmute microphone':'Mute microphone'); });
   addEventListener('pagehide',()=>{ if(joined) leave(); });
   if (role) { ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; }
