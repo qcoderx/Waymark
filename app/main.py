@@ -152,6 +152,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def landing_page() -> FileResponse:
         return FileResponse(Path(__file__).parent / "static" / "landing.html")
 
+    @app.get("/workspace", include_in_schema=False)
+    async def workspace_page() -> FileResponse:
+        return FileResponse(Path(__file__).parent / "static" / "workspace.html")
+
     @app.post(
         "/v1/deliveries",
         response_model=DeliverySession,

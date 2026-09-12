@@ -1,5 +1,9 @@
 # Waymark
 
+The public landing page is served at `/`. Open `/workspace` to create customer-care
+sessions or deliveries, generate both participant call links, run agent actions,
+approve sensitive tasks, create invoices, and review the live activity timeline.
+
 Waymark is an action layer for two-sided conversations. It listens to both participants,
 understands what they need, reads permitted organizational data, performs approved tasks, and
 shares the result while they are still talking. Delivery navigation is the first vertical;

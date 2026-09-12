@@ -53,6 +53,12 @@ class APISmokeTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("Try Waymark live", response.text)
                 self.assertIn("/v1/care/sessions", response.text)
+                self.assertIn('href="/workspace"', response.text)
+
+                workspace = client.get("/workspace")
+                self.assertEqual(workspace.status_code, 200)
+                self.assertIn("Create customer-care session", workspace.text)
+                self.assertIn("/v1/deliveries", workspace.text)
         finally:
             for suffix in ("", "-wal", "-shm"):
                 Path(str(database_path) + suffix).unlink(missing_ok=True)
