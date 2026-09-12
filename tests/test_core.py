@@ -35,6 +35,28 @@ from app.telephony import (
 
 
 class APISmokeTests(unittest.TestCase):
+    def test_landing_page_serves_live_demo(self) -> None:
+        from app.main import create_app
+
+        database_path = Path("data") / f"landing-test-{uuid.uuid4().hex}.db"
+        settings = replace(
+            Settings.from_env(),
+            database_path=database_path,
+            database_url=None,
+            care_agent_enabled=False,
+            mapbox_access_token=None,
+            intron_api_key=None,
+        )
+        try:
+            with TestClient(create_app(settings)) as client:
+                response = client.get("/")
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("Try Waymark live", response.text)
+                self.assertIn("/v1/care/sessions", response.text)
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database_path) + suffix).unlink(missing_ok=True)
+
     def test_customer_care_daily_links_join_shared_action_call(self) -> None:
         from app.main import create_app
 

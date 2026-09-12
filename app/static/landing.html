@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#061b26">
+  <meta name="description" content="Waymark listens to both sides of a conversation, understands what needs to happen, and gets the work done.">
+  <title>Waymark — conversations that get things done</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23ffc928' d='M32 60S8 42 8 24a24 24 0 1148 0c0 18-24 36-24 36Z'/%3E%3Ccircle cx='32' cy='24' r='8' fill='%23061b26'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink:#061b26;
+      --ink-soft:#0d2c38;
+      --paper:#f5f0e6;
+      --paper-deep:#e8e0d2;
+      --yellow:#ffc928;
+      --lagoon:#12b8ae;
+      --coral:#ff6b4a;
+      --sky:#a9dbe0;
+      --muted:#78909a;
+      --line:rgba(6,27,38,.16);
+      --display:"Bricolage Grotesque","Arial Black",sans-serif;
+      --body:"Manrope","Segoe UI",sans-serif;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; overflow-x:hidden; color:var(--ink); background:var(--paper); font-family:var(--body); }
+    a { color:inherit; }
+    button,input,textarea { font:inherit; }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    :focus-visible { outline:3px solid var(--coral); outline-offset:4px; }
+    .shell { width:min(1180px,calc(100% - 44px)); margin-inline:auto; }
+    .nav-wrap { position:absolute; z-index:20; top:0; left:0; width:100%; color:white; }
+    nav { height:88px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,.16); }
+    .brand { display:flex; align-items:center; gap:12px; color:white; font-family:var(--display); font-size:21px; font-weight:800; text-decoration:none; letter-spacing:-.03em; }
+    .mark { position:relative; display:inline-grid; width:31px; height:31px; place-items:center; transform:rotate(-45deg); border:7px solid var(--yellow); border-radius:50% 50% 50% 12%; }
+    .mark::after { content:""; width:5px; height:5px; border-radius:50%; background:var(--paper); }
+    .nav-links { display:flex; align-items:center; gap:34px; font-size:13px; font-weight:600; }
+    .nav-links a { color:rgba(255,255,255,.72); text-decoration:none; transition:color .2s ease; }
+    .nav-links a:hover { color:white; }
+    .nav-cta { padding:12px 17px; color:var(--ink)!important; background:var(--yellow); border-radius:4px; }
+
+    .hero { position:relative; min-height:760px; color:white; background:var(--ink); overflow:hidden; }
+    .hero::before { content:""; position:absolute; inset:0; opacity:.27; background-image:linear-gradient(rgba(255,255,255,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.055) 1px,transparent 1px); background-size:44px 44px; mask-image:linear-gradient(to right,black,transparent 60%); }
+    .hero::after { content:""; position:absolute; width:650px; height:650px; right:-210px; top:-250px; border:1px solid rgba(18,184,174,.3); border-radius:50%; box-shadow:0 0 0 100px rgba(18,184,174,.035),0 0 0 200px rgba(18,184,174,.025); }
+    .hero-grid { position:relative; z-index:2; min-height:760px; padding-top:152px; padding-bottom:78px; display:grid; grid-template-columns:minmax(0,1.08fr) minmax(420px,.92fr); align-items:center; gap:70px; }
+    .hero-copy { max-width:680px; }
+    .hero-note { display:flex; align-items:center; gap:10px; margin:0 0 26px; color:var(--sky); font-size:13px; font-weight:600; }
+    .hero-note::before { content:""; width:34px; height:2px; background:var(--lagoon); box-shadow:8px -5px 0 -0.5px var(--lagoon),16px 4px 0 -0.5px var(--lagoon); }
+    h1 { margin:0; max-width:690px; font-family:var(--display); font-size:clamp(58px,7vw,104px); line-height:.91; letter-spacing:-.065em; font-weight:700; text-wrap:balance; }
+    .hero-sub { max-width:585px; margin:31px 0 0; color:rgba(255,255,255,.7); font-size:18px; line-height:1.7; }
+    .hero-actions { display:flex; align-items:center; gap:24px; margin-top:40px; }
+    .button { display:inline-flex; min-height:54px; padding:0 23px; align-items:center; justify-content:center; gap:12px; border:0; border-radius:4px; font-weight:800; text-decoration:none; cursor:pointer; transition:transform .2s ease,box-shadow .2s ease,background .2s ease; }
+    .button:hover { transform:translateY(-2px); }
+    .button-primary { color:var(--ink); background:var(--yellow); box-shadow:0 12px 32px rgba(255,201,40,.15); }
+    .button-primary:hover { box-shadow:0 16px 38px rgba(255,201,40,.24); }
+    .button-icon { display:grid; width:25px; height:25px; place-items:center; border-radius:50%; background:rgba(6,27,38,.12); }
+    .text-link { color:white; font-size:14px; font-weight:700; text-underline-offset:6px; text-decoration-color:rgba(255,255,255,.32); }
+
+    .conversation-stage { position:relative; min-height:490px; perspective:1000px; }
+    .stage-glow { position:absolute; inset:8% -10% 0; background:radial-gradient(circle at 50% 47%,rgba(18,184,174,.19),transparent 57%); pointer-events:none; }
+    .call-card { position:absolute; inset:24px 8px 38px 24px; padding:22px; border:1px solid rgba(255,255,255,.17); border-radius:9px; background:linear-gradient(145deg,rgba(255,255,255,.095),rgba(255,255,255,.035)); box-shadow:0 34px 80px rgba(0,0,0,.27); backdrop-filter:blur(16px); transform:rotateY(-5deg) rotateX(2deg); transform-style:preserve-3d; transition:transform .18s ease-out; }
+    .call-top { display:flex; align-items:center; justify-content:space-between; color:rgba(255,255,255,.64); font-size:11px; }
+    .live { display:flex; align-items:center; gap:8px; color:white; font-weight:700; }
+    .live::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--coral); box-shadow:0 0 0 5px rgba(255,107,74,.12); animation:livePulse 1.8s ease-in-out infinite; }
+    .voices { position:relative; height:246px; margin-top:24px; }
+    .person { position:absolute; z-index:4; display:flex; align-items:center; gap:10px; }
+    .person-a { top:12px; left:0; }
+    .person-b { top:146px; right:0; flex-direction:row-reverse; text-align:right; }
+    .avatar { display:grid; width:40px; height:40px; flex:0 0 auto; place-items:center; border-radius:50%; color:var(--ink); background:var(--paper); font-family:var(--display); font-weight:800; }
+    .person-b .avatar { background:var(--sky); }
+    .person small { display:block; color:rgba(255,255,255,.45); font-size:9px; }
+    .person strong { display:block; margin-top:2px; font-size:12px; }
+    .speech { position:absolute; z-index:3; max-width:230px; padding:12px 14px; color:var(--ink); background:white; border-radius:3px 12px 12px 12px; font-size:12px; line-height:1.45; opacity:0; animation:say 8s ease-in-out infinite; }
+    .speech-a { top:62px; left:45px; }
+    .speech-b { right:44px; top:196px; color:white; background:var(--ink-soft); border:1px solid rgba(255,255,255,.15); border-radius:12px 3px 12px 12px; animation-delay:2.5s; }
+    .agent-core { position:absolute; z-index:5; top:82px; left:50%; width:84px; height:84px; transform:translateX(-50%); display:grid; place-items:center; border:1px solid rgba(18,184,174,.65); border-radius:50%; background:rgba(6,27,38,.9); box-shadow:0 0 0 13px rgba(18,184,174,.07),0 0 42px rgba(18,184,174,.28); }
+    .agent-core .mark { transform:rotate(-45deg) scale(.8); }
+    .agent-core::before,.agent-core::after { content:""; position:absolute; inset:-14px; border:1px solid rgba(18,184,174,.22); border-radius:50%; animation:orbit 8s linear infinite; }
+    .agent-core::after { inset:-25px; border-style:dashed; animation-direction:reverse; animation-duration:13s; }
+    .signal-map { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+    .signal-map path { fill:none; stroke:rgba(18,184,174,.42); stroke-width:1.5; stroke-dasharray:5 8; animation:dash 2s linear infinite; }
+    .action-ticket { position:absolute; z-index:8; right:-22px; bottom:-28px; width:252px; padding:17px; color:var(--ink); background:var(--yellow); border-radius:4px; box-shadow:0 22px 50px rgba(0,0,0,.3); transform:translateY(24px) rotate(2deg); opacity:0; animation:ticket 8s cubic-bezier(.2,.7,.2,1) infinite; }
+    .action-ticket small { display:flex; align-items:center; gap:7px; font-size:9px; font-weight:800; }
+    .action-ticket small::before { content:"✓"; display:grid; width:18px; height:18px; place-items:center; color:white; border-radius:50%; background:var(--ink); }
+    .action-ticket strong { display:block; margin-top:11px; font-family:var(--display); font-size:17px; }
+    .action-ticket span { display:block; margin-top:3px; font-size:11px; opacity:.7; }
+    .stage-caption { position:absolute; left:0; bottom:0; color:rgba(255,255,255,.4); font-size:10px; writing-mode:vertical-rl; transform:rotate(180deg); }
+
+    .proof-strip { background:var(--yellow); border-bottom:1px solid rgba(6,27,38,.2); }
+    .proof-inner { min-height:76px; display:grid; grid-template-columns:1.1fr repeat(4,auto); gap:38px; align-items:center; }
+    .proof-inner p { margin:0; font-family:var(--display); font-size:17px; font-weight:700; }
+    .proof-item { display:flex; align-items:center; gap:9px; white-space:nowrap; font-size:12px; font-weight:800; }
+    .proof-item::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--ink); }
+
+    .section { padding:118px 0; }
+    .section-head { display:grid; grid-template-columns:.8fr 1.2fr; gap:70px; align-items:start; margin-bottom:72px; }
+    .section-kicker { margin:8px 0 0; color:#45616b; font-size:13px; font-weight:700; }
+    h2 { margin:0; max-width:800px; font-family:var(--display); font-size:clamp(42px,5.5vw,74px); line-height:.98; letter-spacing:-.055em; font-weight:650; text-wrap:balance; }
+    .usecase-list { border-top:1px solid var(--line); }
+    .usecase { position:relative; display:grid; grid-template-columns:90px .75fr 1fr; gap:36px; align-items:center; min-height:174px; padding:28px 0; border-bottom:1px solid var(--line); overflow:hidden; }
+    .usecase::before { content:""; position:absolute; inset:0; z-index:-1; background:var(--ink); transform:scaleY(0); transform-origin:bottom; transition:transform .35s cubic-bezier(.2,.8,.2,1); }
+    .usecase:hover { color:white; }
+    .usecase:hover::before { transform:scaleY(1); }
+    .usecase-num { color:#6f858c; font-family:var(--display); font-size:14px; }
+    .usecase h3 { margin:0; font-family:var(--display); font-size:clamp(26px,3vw,40px); letter-spacing:-.04em; }
+    .usecase p { max-width:520px; margin:0; color:#587079; font-size:15px; line-height:1.7; transition:color .3s ease; }
+    .usecase:hover p,.usecase:hover .usecase-num { color:rgba(255,255,255,.64); }
+    .usecase-symbol { position:absolute; right:10px; width:58px; height:58px; opacity:0; transform:translateX(20px) rotate(-10deg); transition:opacity .3s,transform .3s; }
+    .usecase:hover .usecase-symbol { opacity:1; transform:translateX(0) rotate(0); }
+
+    .process { color:white; background:var(--ink); }
+    .process .section-kicker { color:var(--sky); }
+    .process-head { display:grid; grid-template-columns:1fr .75fr; gap:70px; align-items:end; }
+    .process-intro { margin:0; color:rgba(255,255,255,.58); font-size:16px; line-height:1.7; }
+    .process-line { position:relative; display:grid; grid-template-columns:repeat(3,1fr); gap:0; margin-top:80px; border-top:1px solid rgba(255,255,255,.2); }
+    .process-line::before { content:""; position:absolute; top:-1px; left:0; width:33.333%; height:2px; background:var(--lagoon); animation:processScan 5s ease-in-out infinite; }
+    .step { min-height:260px; padding:34px 38px 10px 0; border-right:1px solid rgba(255,255,255,.12); }
+    .step + .step { padding-left:38px; }
+    .step:last-child { border-right:0; }
+    .step-index { display:grid; width:36px; height:36px; place-items:center; border:1px solid rgba(255,255,255,.25); border-radius:50%; color:var(--yellow); font-family:var(--display); font-size:13px; }
+    .step h3 { margin:45px 0 12px; font-family:var(--display); font-size:28px; letter-spacing:-.035em; }
+    .step p { margin:0; color:rgba(255,255,255,.55); font-size:14px; line-height:1.7; }
+
+    .trust { background:var(--paper-deep); }
+    .trust-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:100px; align-items:center; }
+    .trust-copy p { max-width:650px; margin:28px 0 0; color:#516870; font-size:17px; line-height:1.75; }
+    .ledger { padding:12px 0; border-top:1px solid var(--line); }
+    .ledger-row { display:grid; grid-template-columns:46px 1fr auto; align-items:center; min-height:75px; border-bottom:1px solid var(--line); }
+    .ledger-icon { display:grid; width:30px; height:30px; place-items:center; border-radius:50%; color:white; background:var(--lagoon); font-size:12px; font-weight:900; }
+    .ledger-row strong { font-size:13px; }
+    .ledger-row span { color:#667b83; font-size:11px; }
+
+    .demo { position:relative; overflow:hidden; color:white; background:#0a2733; }
+    .demo::before { content:""; position:absolute; inset:0; opacity:.15; background:radial-gradient(circle at var(--pointer-x,70%) var(--pointer-y,30%),var(--lagoon),transparent 28%); }
+    .demo-grid { position:relative; display:grid; grid-template-columns:.78fr 1.22fr; gap:80px; align-items:start; }
+    .demo-copy { position:sticky; top:40px; }
+    .demo-copy h2 { margin-top:14px; }
+    .demo-copy p { max-width:450px; margin:26px 0 0; color:rgba(255,255,255,.6); line-height:1.75; }
+    .demo-panel { padding:34px; border:1px solid rgba(255,255,255,.15); border-radius:8px; background:rgba(4,18,25,.62); box-shadow:0 32px 90px rgba(0,0,0,.3); }
+    .scenario-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; padding:6px; background:rgba(255,255,255,.06); border-radius:6px; }
+    .scenario { min-height:46px; border:0; border-radius:4px; color:rgba(255,255,255,.56); background:transparent; font-size:12px; font-weight:800; cursor:pointer; }
+    .scenario[aria-selected="true"] { color:var(--ink); background:var(--paper); }
+    .demo-label { display:block; margin:30px 0 11px; color:rgba(255,255,255,.55); font-size:11px; font-weight:700; }
+    .prompt-box { position:relative; }
+    .prompt-box textarea { width:100%; min-height:132px; resize:vertical; padding:18px 18px 56px; border:1px solid rgba(255,255,255,.17); border-radius:5px; color:white; background:rgba(255,255,255,.055); line-height:1.6; outline:0; }
+    .prompt-box textarea:focus { border-color:var(--lagoon); box-shadow:0 0 0 3px rgba(18,184,174,.13); }
+    .demo-run { position:absolute; right:10px; bottom:10px; min-height:38px; padding:0 15px; border:0; border-radius:4px; color:var(--ink); background:var(--yellow); font-size:11px; font-weight:900; cursor:pointer; }
+    .demo-run:disabled { opacity:.58; cursor:wait; }
+    .result { display:none; margin-top:18px; padding:19px; border-left:3px solid var(--lagoon); background:rgba(18,184,174,.09); }
+    .result.show { display:block; animation:resultIn .4s ease both; }
+    .result-head { display:flex; align-items:center; gap:9px; color:var(--sky); font-size:10px; font-weight:800; }
+    .result p { margin:10px 0 0; font-size:14px; line-height:1.65; }
+    .result-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:14px; }
+    .result-chip,.download { padding:7px 10px; border:1px solid rgba(255,255,255,.15); border-radius:3px; color:rgba(255,255,255,.72); font-size:10px; text-decoration:none; }
+    .download { color:var(--ink); background:var(--yellow); border-color:var(--yellow); font-weight:800; }
+    .demo-foot { margin:17px 0 0; color:rgba(255,255,255,.36); font-size:10px; line-height:1.55; }
+
+    footer { padding:46px 0; color:white; background:#031219; }
+    .footer-inner { display:flex; justify-content:space-between; align-items:center; }
+    .footer-note { color:rgba(255,255,255,.42); font-size:11px; }
+    .footer-links { display:flex; gap:24px; }
+    .footer-links a { color:rgba(255,255,255,.55); font-size:11px; text-decoration:none; }
+
+    .reveal { opacity:0; transform:translateY(24px); transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1); }
+    .reveal.seen { opacity:1; transform:none; }
+    @keyframes livePulse { 50% { box-shadow:0 0 0 9px rgba(255,107,74,0); } }
+    @keyframes orbit { to { transform:rotate(360deg); } }
+    @keyframes dash { to { stroke-dashoffset:-26; } }
+    @keyframes say { 0%,10%,47%,100% { opacity:0; transform:translateY(8px); } 16%,40% { opacity:1; transform:none; } }
+    @keyframes ticket { 0%,46%,100% { opacity:0; transform:translateY(24px) rotate(2deg); } 55%,88% { opacity:1; transform:translateY(0) rotate(2deg); } }
+    @keyframes processScan { 0%,100% { transform:translateX(0); } 50% { transform:translateX(200%); } }
+    @keyframes resultIn { from { opacity:0; transform:translateY(8px); } }
+
+    @media (max-width:980px) {
+      .hero-grid { grid-template-columns:1fr; gap:36px; padding-top:145px; }
+      .conversation-stage { width:min(100%,580px); min-height:430px; }
+      .proof-inner { grid-template-columns:1fr 1fr; padding:22px 0; }
+      .proof-inner p { grid-column:1/-1; }
+      .section-head,.trust-grid,.demo-grid { grid-template-columns:1fr; gap:40px; }
+      .demo-copy { position:static; }
+    }
+    @media (max-width:720px) {
+      .shell { width:min(calc(100% - 30px),1180px); }
+      nav { height:72px; }
+      .nav-links { gap:0; }
+      .nav-cta { padding-inline:13px; }
+      .nav-links > a:not(.nav-cta) { display:none; }
+      .hero { min-height:auto; }
+      .hero-grid { min-height:auto; padding-top:126px; padding-bottom:64px; }
+      .hero-copy,.conversation-stage { min-width:0; }
+      h1 { font-size:clamp(48px,13.5vw,64px); overflow-wrap:anywhere; }
+      .hero-sub { font-size:16px; }
+      .hero-actions { align-items:flex-start; flex-direction:column; gap:20px; }
+      .conversation-stage { min-height:390px; }
+      .call-card { inset:14px 0 30px 0; transform:none; }
+      .action-ticket { right:-5px; width:225px; }
+      .proof-inner { gap:18px; }
+      .section { padding:82px 0; }
+      .section-head { margin-bottom:46px; }
+      .usecase { grid-template-columns:42px 1fr; gap:12px; padding:30px 0; }
+      .usecase p { grid-column:2; }
+      .usecase-symbol { display:none; }
+      .process-head { grid-template-columns:1fr; gap:26px; }
+      .process-line { grid-template-columns:1fr; border-top:0; margin-top:52px; }
+      .process-line::before { display:none; }
+      .step,.step + .step { min-height:auto; padding:26px 0 34px 52px; border-top:1px solid rgba(255,255,255,.16); border-right:0; }
+      .step-index { position:absolute; margin-left:-52px; }
+      .step h3 { margin:5px 0 10px; }
+      .demo-panel { padding:20px; }
+      .scenario-tabs { grid-template-columns:1fr; }
+      .footer-inner { align-items:flex-start; flex-direction:column; gap:25px; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      html { scroll-behavior:auto; }
+      *,*::before,*::after { animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; }
+      .reveal { opacity:1; transform:none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav-wrap">
+    <nav class="shell" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="Waymark home"><span class="mark" aria-hidden="true"></span>Waymark</a>
+      <div class="nav-links">
+        <a href="#use-cases">What it does</a>
+        <a href="#how">How it works</a>
+        <a href="#trust">Trust</a>
+        <a class="nav-cta" href="#try">Try Waymark</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-grid shell">
+        <div class="hero-copy">
+          <p class="hero-note">The action layer for human conversation</p>
+          <h1>Every conversation should leave the work done.</h1>
+          <p class="hero-sub">Waymark listens to both sides, understands what needs to happen, and takes the next step while everyone is still on the call.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#try">Try Waymark live <span class="button-icon" aria-hidden="true">↘</span></a>
+            <a class="text-link" href="#how">See how it works</a>
+          </div>
+        </div>
+
+        <div class="conversation-stage" id="conversationStage" aria-label="Animated example of Waymark turning a conversation into an action">
+          <div class="stage-glow"></div>
+          <span class="stage-caption">Live conversation / real action</span>
+          <div class="call-card" id="callCard">
+            <div class="call-top"><span class="live">Waymark is listening</span><span>02:14</span></div>
+            <div class="voices">
+              <svg class="signal-map" viewBox="0 0 430 246" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M58 38 C145 38 128 122 216 122"></path>
+                <path d="M216 122 C298 122 278 179 372 179"></path>
+                <path d="M216 122 C238 170 284 210 350 232"></path>
+              </svg>
+              <div class="person person-a"><span class="avatar">KY</span><span><small>Customer</small><strong>Kemi Yusuf</strong></span></div>
+              <p class="speech speech-a">Please send the invoice before we end this call.</p>
+              <div class="agent-core"><span class="mark" aria-hidden="true"></span></div>
+              <div class="person person-b"><span class="avatar">BO</span><span><small>Business</small><strong>Bello &amp; Co.</strong></span></div>
+              <p class="speech speech-b">Make it ₦350,000, due month-end.</p>
+            </div>
+            <div class="action-ticket">
+              <small>Action completed</small>
+              <strong>Invoice WM-2048</strong>
+              <span>PDF ready for both participants</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="proof-strip">
+      <div class="proof-inner shell">
+        <p>One shared intelligence, wherever work happens.</p>
+        <span class="proof-item">Customer care</span>
+        <span class="proof-item">Business</span>
+        <span class="proof-item">Fintech</span>
+        <span class="proof-item">Delivery</span>
+      </div>
+    </div>
+
+    <section class="section" id="use-cases">
+      <div class="shell">
+        <div class="section-head reveal">
+          <p class="section-kicker">Where Waymark works</p>
+          <h2>One agent for every conversation with a next step.</h2>
+        </div>
+        <div class="usecase-list">
+          <article class="usecase reveal">
+            <span class="usecase-num">01</span>
+            <h3>Customer care</h3>
+            <p>Resolve bank, telecom, and fintech requests while the customer speaks. Waymark finds the right account, answers questions, opens cases, and carries out approved actions.</p>
+            <svg class="usecase-symbol" viewBox="0 0 64 64" aria-hidden="true"><path d="M10 31h44M32 9v44" stroke="#ffc928" stroke-width="7"/><circle cx="32" cy="32" r="25" fill="none" stroke="#12b8ae" stroke-width="2"/></svg>
+          </article>
+          <article class="usecase reveal">
+            <span class="usecase-num">02</span>
+            <h3>Business calls</h3>
+            <p>Turn agreements into finished work. Generate invoices and shared documents from the details already discussed, ready for both sides before the call ends.</p>
+            <svg class="usecase-symbol" viewBox="0 0 64 64" aria-hidden="true"><path d="M15 8h27l9 10v38H15z" fill="none" stroke="#ffc928" stroke-width="4"/><path d="M23 29h20M23 39h20M23 49h12" stroke="#12b8ae" stroke-width="3"/></svg>
+          </article>
+          <article class="usecase reveal">
+            <span class="usecase-num">03</span>
+            <h3>Last-mile delivery</h3>
+            <p>Hear local directions from riders and customers, ground spoken landmarks on the map, and learn the route so the next delivery reaches the door faster.</p>
+            <svg class="usecase-symbol" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 57S12 39 12 23a20 20 0 1140 0c0 16-20 34-20 34z" fill="none" stroke="#ffc928" stroke-width="4"/><circle cx="32" cy="23" r="7" fill="#12b8ae"/></svg>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section process" id="how">
+      <div class="shell">
+        <div class="process-head reveal">
+          <div><p class="section-kicker">From voice to outcome</p><h2>It hears the words. It understands the job.</h2></div>
+          <p class="process-intro">Waymark stays in the shared context of the call, so people do not have to stop, repeat everything, and fill another form.</p>
+        </div>
+        <div class="process-line reveal">
+          <article class="step"><span class="step-index">1</span><h3>Listen to both sides</h3><p>Speaker-aware transcription keeps each request, correction, and agreement in the right context.</p></article>
+          <article class="step"><span class="step-index">2</span><h3>Understand the intent</h3><p>The agent connects what was said with verified customer data, business rules, and live location context.</p></article>
+          <article class="step"><span class="step-index">3</span><h3>Take the next step</h3><p>Waymark uses the right tool, asks for confirmation when needed, and shares the result with everyone.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section trust" id="trust">
+      <div class="trust-grid shell">
+        <div class="trust-copy reveal">
+          <p class="section-kicker">Human control stays in the room</p>
+          <h2>Agentic where it helps. Careful where it matters.</h2>
+          <p>Waymark clearly discloses that it is listening, records what it did, and pauses sensitive actions for confirmation. People can see the same outcome instead of trusting a hidden process.</p>
+        </div>
+        <div class="ledger reveal" aria-label="Example Waymark activity timeline">
+          <div class="ledger-row"><span class="ledger-icon">✓</span><strong>Customer identified</strong><span>10:42:03</span></div>
+          <div class="ledger-row"><span class="ledger-icon">✓</span><strong>Account data retrieved</strong><span>10:42:05</span></div>
+          <div class="ledger-row"><span class="ledger-icon">!</span><strong>Card freeze needs approval</strong><span>10:42:08</span></div>
+          <div class="ledger-row"><span class="ledger-icon">✓</span><strong>Customer confirmed</strong><span>10:42:12</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section demo" id="try">
+      <div class="demo-grid shell">
+        <div class="demo-copy reveal">
+          <p class="section-kicker">Try the working agent</p>
+          <h2>Give Waymark a real task.</h2>
+          <p>Choose a sandbox customer and ask naturally. This connects to the same agent, tools, and demo database used during a Waymark call.</p>
+        </div>
+        <div class="demo-panel reveal">
+          <div class="scenario-tabs" role="tablist" aria-label="Demo scenario">
+            <button class="scenario" role="tab" aria-selected="true" data-scenario="banking">Banking</button>
+            <button class="scenario" role="tab" aria-selected="false" data-scenario="telecom">Telecom</button>
+            <button class="scenario" role="tab" aria-selected="false" data-scenario="business">Business</button>
+          </div>
+          <label class="demo-label" for="demoPrompt">What should Waymark do?</label>
+          <div class="prompt-box">
+            <textarea id="demoPrompt" maxlength="600">What is my available account balance?</textarea>
+            <button class="demo-run" id="demoRun" type="button">Run live demo</button>
+          </div>
+          <div class="result" id="demoResult" aria-live="polite">
+            <div class="result-head" id="resultHead">WAYMARK RESPONSE</div>
+            <p id="resultText"></p>
+            <div class="result-actions" id="resultActions"></div>
+          </div>
+          <p class="demo-foot">Sandbox only. The profiles and balances in this demo are fictional.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner shell">
+      <a class="brand" href="#top"><span class="mark" aria-hidden="true"></span>Waymark</a>
+      <span class="footer-note">Conversations that get things done.</span>
+      <div class="footer-links"><a href="/docs">API</a><a href="/health">System status</a></div>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const stage = document.getElementById('conversationStage');
+      const card = document.getElementById('callCard');
+      if (!reducedMotion && matchMedia('(pointer: fine)').matches) {
+        stage.addEventListener('pointermove', event => {
+          const rect = stage.getBoundingClientRect();
+          const x = (event.clientX - rect.left) / rect.width - .5;
+          const y = (event.clientY - rect.top) / rect.height - .5;
+          card.style.transform = `rotateY(${x * 9 - 5}deg) rotateX(${-y * 7 + 2}deg)`;
+        });
+        stage.addEventListener('pointerleave', () => card.style.transform = 'rotateY(-5deg) rotateX(2deg)');
+      }
+
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => entry.target.classList.toggle('seen', entry.isIntersecting));
+      }, {threshold:.16});
+      document.querySelectorAll('.reveal').forEach(element => observer.observe(element));
+
+      const demo = document.querySelector('.demo');
+      demo.addEventListener('pointermove', event => {
+        const rect = demo.getBoundingClientRect();
+        demo.style.setProperty('--pointer-x', `${event.clientX - rect.left}px`);
+        demo.style.setProperty('--pointer-y', `${event.clientY - rect.top}px`);
+      });
+
+      const scenarios = {
+        banking: {
+          vertical:'banking', organization:'Waymark Demo Bank', customer_id:'cust_bank_amina', subject:'Landing page demo',
+          prompt:'What is my available account balance?'
+        },
+        telecom: {
+          vertical:'telecom', organization:'Waymark Demo Mobile', customer_id:'cust_tel_chidi', subject:'Landing page demo',
+          prompt:'How much mobile data do I have left and when does it expire?'
+        },
+        business: {
+          vertical:'business', organization:'Bello Creative Studio', customer_id:'cust_biz_kemi', subject:'Landing page demo',
+          prompt:'Create an invoice from Bello Creative Studio to Northwind Traders for one website design at NGN 350,000, due 30 September 2026.'
+        }
+      };
+      let selected = 'banking';
+      const prompt = document.getElementById('demoPrompt');
+      const run = document.getElementById('demoRun');
+      const result = document.getElementById('demoResult');
+      const resultHead = document.getElementById('resultHead');
+      const resultText = document.getElementById('resultText');
+      const resultActions = document.getElementById('resultActions');
+
+      document.querySelectorAll('.scenario').forEach(button => button.addEventListener('click', () => {
+        selected = button.dataset.scenario;
+        document.querySelectorAll('.scenario').forEach(item => item.setAttribute('aria-selected', String(item === button)));
+        prompt.value = scenarios[selected].prompt;
+        result.classList.remove('show');
+      }));
+
+      run.addEventListener('click', async () => {
+        const text = prompt.value.trim();
+        if (!text) { prompt.focus(); return; }
+        run.disabled = true;
+        run.textContent = 'Waymark is working…';
+        result.classList.add('show');
+        resultHead.textContent = 'LISTENING / REASONING / ACTING';
+        resultText.textContent = 'Connecting the conversation to the right tools…';
+        resultActions.replaceChildren();
+        try {
+          const config = scenarios[selected];
+          const sessionResponse = await fetch('/v1/care/sessions', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)
+          });
+          if (!sessionResponse.ok) throw new Error('The demo session could not start.');
+          const session = await sessionResponse.json();
+          const turnResponse = await fetch(`/v1/care/sessions/${session.id}/turns`, {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({speaker:'customer',text})
+          });
+          if (!turnResponse.ok) throw new Error('Waymark could not complete that request.');
+          const turn = await turnResponse.json();
+          resultHead.textContent = 'WAYMARK COMPLETED THE TURN';
+          resultText.textContent = turn.reply;
+          for (const action of turn.actions || []) {
+            const chip = document.createElement('span');
+            chip.className = 'result-chip';
+            chip.textContent = action.status === 'pending_confirmation' ? 'Confirmation required' : action.action_type.replaceAll('_',' ');
+            resultActions.appendChild(chip);
+          }
+          for (const artifact of turn.artifacts || []) {
+            const link = document.createElement('a');
+            link.className = 'download';
+            link.href = artifact.download_url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = `Download ${artifact.file_name || 'document'}`;
+            resultActions.appendChild(link);
+          }
+        } catch (error) {
+          resultHead.textContent = 'DEMO COULD NOT FINISH';
+          resultText.textContent = `${error.message} Try again in a moment.`;
+        } finally {
+          run.disabled = false;
+          run.textContent = 'Run live demo';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

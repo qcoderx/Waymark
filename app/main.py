@@ -148,6 +148,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "trace_id": request.state.trace_id,
         }
 
+    @app.get("/", include_in_schema=False)
+    async def landing_page() -> FileResponse:
+        return FileResponse(Path(__file__).parent / "static" / "landing.html")
+
     @app.post(
         "/v1/deliveries",
         response_model=DeliverySession,
