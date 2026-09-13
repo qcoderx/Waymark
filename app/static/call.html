@@ -69,6 +69,7 @@
     .assistant-panel p { margin:8px 0 0; color:#5d5751; font-size:11px; line-height:1.55; }
     .assistant-panel a { display:inline-flex; margin:11px 7px 0 0; padding:8px 10px; border-radius:3px; color:var(--ink); background:var(--yellow); font-size:9px; font-weight:900; text-decoration:none; }
     .guidance-panel { display:none; margin-top:14px; overflow:hidden; border:1px solid rgba(233,72,63,.25); border-radius:7px; background:#fff; }
+    .guidance-panel.processing { box-shadow:0 0 0 4px rgba(233,72,63,.12); }
     .guidance-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:13px 14px; border-bottom:1px solid var(--line); }
     .guidance-head small { display:block; color:var(--red-deep); font-size:8px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
     .guidance-head strong { display:block; margin-top:4px; font-family:var(--display); font-size:14px; letter-spacing:-.025em; }
@@ -177,7 +178,7 @@
   const roleNames = {rider:'Rider',customer:'Customer',agent:'Support agent',employee:'Business',counterparty:'Counterparty'};
   const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','sound','mute','primary','error','assistantPanel','assistantReply','artifactLinks','guidancePanel','guidanceTitle','guidanceInstruction','guidanceTranscript','locateRider'].map(id => [id, document.getElementById(id)]));
   let call, audioSocket, audioContext, audioProcessor, flushTimer, pollTimer, muted = false, joined = false, captureTrackId;
-  let guidanceSocket, guidancePollTimer, guidanceMap, guidanceMapReady, guidanceToken, destination, destinationMarker, riderMarker, riderLocation, latestGuidance, landmarkMarkers=[], routeRevision=0, guidanceActive=false;
+  let guidanceSocket, guidancePollTimer, guidanceMap, guidanceMapReady, guidanceToken, destination, destinationMarker, riderMarker, riderLocation, latestGuidance, locationWatchId, lastRouteAt=0, landmarkMarkers=[], routeRevision=0, guidanceActive=false;
   const sdk = window.Daily || window.DailyIframe;
 
   function fail(message) { ui.error.textContent = message; ui.error.style.display = 'block'; ui.primary.disabled = false; }
@@ -299,8 +300,8 @@
     catch(_){ return points; }
   }
   async function renderGuidance(guidance) {
-    if(!guidanceMap || !guidanceMapReady)return;
     latestGuidance=guidance;
+    if(!guidanceMap || !guidanceMapReady)return;
     const revision=++routeRevision,points=routePoints(guidance);
     await guidanceMapReady;if(revision!==routeRevision)return;ensureRouteLayers();
     landmarkMarkers.forEach(marker=>marker.remove());landmarkMarkers=[];
@@ -308,6 +309,7 @@
     points.slice(landmarkStart,-1).forEach(point=>landmarkMarkers.push(new mapboxgl.Marker({color:'#f7c94b',scale:.7}).setLngLat(point).addTo(guidanceMap)));
     const geometry=await roadGeometry(points);if(revision!==routeRevision)return;
     guidanceMap.getSource('waymark-route').setData(routeData(geometry));
+    guidanceMap.setPaintProperty('waymark-route-line','line-opacity',1);
     if(points.length>1){const bounds=points.reduce((box,point)=>box.extend(point),new mapboxgl.LngLatBounds(points[0],points[0]));guidanceMap.fitBounds(bounds,{padding:54,maxZoom:16,duration:650});}
     const steps=(guidance?.trail || []).map(step=>step.instruction).filter(Boolean);
     ui.guidanceTitle.textContent=(guidance?.trail || []).length?'Live path updated':(points.length>1?'Route to destination':'Destination pinned');
@@ -315,7 +317,7 @@
     ui.guidanceTranscript.textContent=`${Math.round((guidance?.confidence || 0)*100)}% guidance confidence`;
   }
   function handleGuidanceEvent(event) {
-    if(event.type==='transcript.partial' && event.data?.transcript){ui.guidanceTitle.textContent='Listening live';ui.guidanceTranscript.textContent=event.data.transcript;}
+    if(event.type==='transcript.partial' && event.data?.transcript){ui.guidanceTitle.textContent='Listening live';ui.guidanceTranscript.textContent=event.data.transcript;ui.guidancePanel.classList.add('processing');if(guidanceMap?.getLayer('waymark-route-line'))guidanceMap.setPaintProperty('waymark-route-line','line-opacity',.62);clearTimeout(handleGuidanceEvent.timer);handleGuidanceEvent.timer=setTimeout(()=>ui.guidancePanel.classList.remove('processing'),700);}
     if(event.type==='transcript.final' && event.data?.transcript){ui.guidanceTitle.textContent='Grounding directions';ui.guidanceTranscript.textContent=event.data.transcript;}
     if(['guidance.updated','guidance.uncertain','route.reused'].includes(event.type) && event.data?.guidance)renderGuidance(event.data.guidance);
   }
@@ -329,15 +331,20 @@
     guidanceSocket.onclose=()=>{if(guidanceActive&&!guidancePollTimer){guidancePollTimer=setInterval(pollGuidance,3500);pollGuidance();}};
   }
   function locateRider() {
+    if(locationWatchId!==undefined)return;
     if(!navigator.geolocation){ui.guidanceTranscript.textContent='Location is unavailable in this browser.';return;}
     ui.locateRider.disabled=true;ui.locateRider.textContent='Locating…';ui.guidanceTranscript.textContent='Allow location access to start the red route.';
-    navigator.geolocation.getCurrentPosition(
+    locationWatchId=navigator.geolocation.watchPosition(
       position=>{
+        const previous=riderLocation,now=Date.now();
         riderLocation={lat:position.coords.latitude,lng:position.coords.longitude};
-        riderMarker?.remove();riderMarker=new mapboxgl.Marker({color:'#171716'}).setLngLat([riderLocation.lng,riderLocation.lat]).addTo(guidanceMap);
-        ui.locateRider.textContent='Location on';ui.guidanceTranscript.textContent='Route starts from your current position.';renderGuidance(latestGuidance || {trail:[],candidates:{},confidence:0});
+        if(!riderMarker)riderMarker=new mapboxgl.Marker({color:'#171716'}).setLngLat([riderLocation.lng,riderLocation.lat]).addTo(guidanceMap);
+        else riderMarker.setLngLat([riderLocation.lng,riderLocation.lat]);
+        ui.locateRider.textContent='Location live';ui.guidanceTranscript.textContent='Red route is following your position.';
+        const moved=!previous||Math.abs(previous.lat-riderLocation.lat)+Math.abs(previous.lng-riderLocation.lng)>.00015;
+        if(moved&&(!previous||now-lastRouteAt>5000)){lastRouteAt=now;renderGuidance(latestGuidance || {trail:[],candidates:{},confidence:0});}
       },
-      ()=>{ui.locateRider.disabled=false;ui.locateRider.textContent='Try location again';ui.guidanceTranscript.textContent='Location was not shared. The destination pin remains visible.';},
+      ()=>{if(locationWatchId!==undefined)navigator.geolocation.clearWatch(locationWatchId);locationWatchId=undefined;ui.locateRider.disabled=false;ui.locateRider.textContent='Try location again';ui.guidanceTranscript.textContent='Location was not shared. Tap here to retry.';},
       {enableHighAccuracy:true,timeout:10000,maximumAge:15000}
     );
   }
@@ -354,11 +361,11 @@
       guidanceMap.addControl(new mapboxgl.NavigationControl({showCompass:false}),'top-right');
       destinationMarker=new mapboxgl.Marker({color:'#e9483f'}).setLngLat([destination.lng,destination.lat]).addTo(guidanceMap);
       guidanceMapReady=new Promise(resolve=>guidanceMap.once('load',()=>{ensureRouteLayers();resolve();}));
-      openGuidanceStream();pollGuidance();
+      openGuidanceStream();pollGuidance();locateRider();
     } catch(error) { ui.guidanceTitle.textContent='Destination unavailable';ui.guidanceInstruction.textContent=error.message;ui.guidanceTranscript.textContent='The audio call can continue.'; }
   }
   function stopGuidance() {
-    guidanceActive=false;guidanceSocket?.close();guidanceSocket=null;clearInterval(guidancePollTimer);guidancePollTimer=null;
+    guidanceActive=false;guidanceSocket?.close();guidanceSocket=null;clearInterval(guidancePollTimer);guidancePollTimer=null;if(locationWatchId!==undefined)navigator.geolocation.clearWatch(locationWatchId);locationWatchId=undefined;
   }
   ui.locateRider.addEventListener('click',locateRider);
   async function join() {
@@ -381,7 +388,7 @@
       call.on('error', event => fail(event.errorMsg || 'The audio call was interrupted.'));
       await call.join({url:session.room_url,token:session.meeting_token,userName:roleNames[role]||'Participant'});
       joined=true; document.body.classList.add('in-call'); ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; ui.micState.textContent='Mic live'; setStatus('Call connected',isCare?'Speak naturally. Waymark can answer and act.':'Speak naturally. Waymark is listening for landmarks.',true); syncAllRemoteAudio();
-      flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},10000);
+      flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},6000);
       if(isCare) { ui.assistantPanel.style.display='block'; pollTimer=setInterval(pollCare,2500); pollCare(); }
       else startGuidance();
       const local=Object.values(call.participants()).find(p=>p.local); const track=local?.tracks?.audio?.persistentTrack || local?.audioTrack; if(track) captureLocalTrack(track,session.audio_websocket_url);

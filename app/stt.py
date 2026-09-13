@@ -80,6 +80,7 @@ class SaharaStream:
         self._socket = await websockets.connect(
             f"{self.settings.intron_stream_url}?{query}",
             additional_headers={"Authorization": f"Bearer {self.settings.intron_api_key}"},
+            compression=None,
             open_timeout=8,
             close_timeout=3,
             max_size=2**20,
