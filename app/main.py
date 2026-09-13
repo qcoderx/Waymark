@@ -636,6 +636,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         trace_id = f"trace_{uuid.uuid4().hex}"
         stream: SaharaStream | None = None
         transcript_task: asyncio.Task | None = None
+        analysis_tasks: set[asyncio.Task] = set()
 
         async def receive_segment(active_stream: SaharaStream) -> None:
             async for message in active_stream.messages():
@@ -650,18 +651,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 elif kind == "COMMITTED_TRANSCRIPT":
                     transcript = message.get("transcript_text", "").strip()
                     if transcript:
-                        await pipeline.process_utterance(
-                            delivery_id,
-                            SimulationUtterance(
-                                transcript=transcript,
-                                speaker=role,
-                                confidence=0.88,
-                                timestamp_ms=int(float(message.get("audio_len", 0)) * 1000),
-                                language_mix=[settings.intron_language, "en"],
-                            ),
-                            call_id=grant.call_id,
-                            trace_id=trace_id,
+                        task = asyncio.create_task(
+                            pipeline.process_utterance(
+                                delivery_id,
+                                SimulationUtterance(
+                                    transcript=transcript,
+                                    speaker=role,
+                                    confidence=0.88,
+                                    timestamp_ms=int(
+                                        float(message.get("audio_len", 0)) * 1000
+                                    ),
+                                    language_mix=[settings.intron_language, "en"],
+                                ),
+                                call_id=grant.call_id,
+                                trace_id=trace_id,
+                            )
                         )
+                        analysis_tasks.add(task)
+                        task.add_done_callback(analysis_tasks.discard)
                     return
                 elif kind in {
                     "ERROR",

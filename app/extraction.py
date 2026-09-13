@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from typing import Any
 
+import httpx
+
+from .config import Settings
 from .domain import (
     ExtractedDirection,
     LandmarkPhrase,
@@ -309,4 +314,285 @@ class DirectionExtractor:
             relations=relations,
             route_steps=steps,
             confidence=max(0.05, min(0.99, confidence)),
+        )
+
+
+ROUTE_INTERPRETATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intent": {
+            "type": "string",
+            "enum": [
+                "delivery_guidance",
+                "arrival_confirmation",
+                "conversation_only",
+                "clarification_needed",
+            ],
+        },
+        "landmarks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "landmark_type": {"type": "string"},
+                    "evidence_quote": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["name", "landmark_type", "evidence_quote", "confidence"],
+                "additionalProperties": False,
+            },
+        },
+        "route_steps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "instruction": {"type": "string"},
+                    "relation_type": {
+                        "type": "string",
+                        "enum": [item.value for item in RelationType],
+                    },
+                    "landmark_name": {"type": ["string", "null"]},
+                    "reference_landmark_name": {"type": ["string", "null"]},
+                    "distance_meters": {"type": ["integer", "null"]},
+                    "ordinal": {"type": ["integer", "null"]},
+                    "evidence_quote": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": [
+                    "instruction",
+                    "relation_type",
+                    "landmark_name",
+                    "reference_landmark_name",
+                    "distance_meters",
+                    "ordinal",
+                    "evidence_quote",
+                    "confidence",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "confidence": {"type": "number"},
+        "needs_clarification": {"type": "boolean"},
+    },
+    "required": [
+        "intent",
+        "landmarks",
+        "route_steps",
+        "confidence",
+        "needs_clarification",
+    ],
+    "additionalProperties": False,
+}
+
+
+class ConversationDirectionPlanner:
+    """Interpret a rolling two-party transcript and return the current best route."""
+
+    def __init__(self, settings: Settings, fallback: DirectionExtractor | None = None) -> None:
+        self.settings = settings
+        self.fallback = fallback or DirectionExtractor()
+
+    async def extract(
+        self,
+        turns: list[dict[str, Any]],
+        *,
+        coarse_address: str | None = None,
+    ) -> ExtractedDirection:
+        clean_turns = [
+            {
+                "speaker": str(turn.get("speaker", "unknown")),
+                "text": re.sub(r"\s+", " ", str(turn.get("transcript", ""))).strip(),
+                "stt_confidence": float(turn.get("confidence", 1.0)),
+            }
+            for turn in turns[-10:]
+            if str(turn.get("transcript", "")).strip()
+        ]
+        raw_text = "\n".join(
+            f"{turn['speaker']}: {turn['text']}" for turn in clean_turns
+        )
+        if not clean_turns:
+            return self.fallback.extract("")
+        if not (
+            self.settings.direction_agent_enabled
+            and self.settings.openai_api_key
+            and not self.settings.demo_mode
+        ):
+            latest = clean_turns[-1]
+            return self.fallback.extract(latest["text"], latest["stt_confidence"])
+
+        instructions = (
+            "You are Waymark's live delivery route interpreter. Read the ordered rolling "
+            "conversation between a rider and customer and reconstruct the best CURRENT "
+            "route guidance. People may interrupt, use pronouns, speak Nigerian English or "
+            "Pidgin, spread one direction across several turns, misunderstand each other, "
+            "or correct themselves. Resolve references from context. A later explicit "
+            "correction replaces the conflicting earlier instruction. Return the cumulative "
+            "route that is still valid, in travel order, rather than only the newest sentence. "
+            "Do not include canceled or negated actions as route steps, and do not repeat the "
+            "same movement in different words. "
+            "Use only landmarks and directions supported by the transcript. Never invent a "
+            "business, landmark, road, coordinate, distance, or turn. Put the exact supporting "
+            "words from the transcript in evidence_quote. If the conversation is ambiguous, "
+            "keep only unambiguous steps and set needs_clarification true. Small talk and audio "
+            "checks are conversation_only. Keep instructions brief and useful to the rider."
+        )
+        body = {
+            "model": self.settings.direction_agent_model,
+            "instructions": instructions,
+            "input": json.dumps(
+                {"coarse_destination": coarse_address, "conversation": clean_turns},
+                ensure_ascii=False,
+            ),
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "live_route_interpretation",
+                    "strict": True,
+                    "schema": ROUTE_INTERPRETATION_SCHEMA,
+                },
+            },
+            "max_output_tokens": 700,
+            "store": False,
+        }
+        if self.settings.direction_agent_model.startswith("gpt-5"):
+            body["reasoning"] = {"effort": "minimal"}
+            body["text"]["verbosity"] = "low"
+        try:
+            async with httpx.AsyncClient(timeout=12) as client:
+                response = await client.post(
+                    f"{self.settings.openai_base_url}/responses",
+                    headers={
+                        "Authorization": f"Bearer {self.settings.openai_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+            response.raise_for_status()
+            return self._validated(response.json(), clean_turns, raw_text)
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            latest = clean_turns[-1]
+            return self.fallback.extract(latest["text"], latest["stt_confidence"])
+
+    @staticmethod
+    def _output_text(payload: dict[str, Any]) -> str:
+        direct = payload.get("output_text")
+        if isinstance(direct, str):
+            return direct
+        parts: list[str] = []
+        for item in payload.get("output", []):
+            if item.get("type") != "message":
+                continue
+            for content in item.get("content", []):
+                if content.get("type") == "output_text" and content.get("text"):
+                    parts.append(content["text"])
+        return " ".join(parts)
+
+    @staticmethod
+    def _supported_quote(quote: Any, transcript: str) -> bool:
+        normalized = normalize_name(str(quote or ""))
+        return len(normalized) >= 2 and normalized in transcript
+
+    @staticmethod
+    def _supported_name(name: str, transcript: str) -> bool:
+        words = [word for word in normalize_name(name).split() if len(word) > 1]
+        return bool(words) and all(word in transcript.split() for word in words)
+
+    def _validated(
+        self,
+        payload: dict[str, Any],
+        turns: list[dict[str, Any]],
+        raw_text: str,
+    ) -> ExtractedDirection:
+        data = json.loads(self._output_text(payload))
+        transcript = normalize_name(" ".join(turn["text"] for turn in turns))
+        average_stt = sum(turn["stt_confidence"] for turn in turns) / len(turns)
+        landmarks: list[LandmarkPhrase] = []
+        landmark_names: dict[str, str] = {}
+        for item in data.get("landmarks", []):
+            name = re.sub(r"\s+", " ", str(item.get("name", ""))).strip()
+            normalized = normalize_name(name)
+            if not normalized or not self._supported_quote(
+                item.get("evidence_quote"), transcript
+            ):
+                continue
+            if not self._supported_name(name, transcript) or normalized in landmark_names:
+                continue
+            confidence = max(
+                0.05,
+                min(0.99, float(item.get("confidence", 0.5)), average_stt),
+            )
+            landmark_names[normalized] = normalized
+            landmarks.append(
+                LandmarkPhrase(
+                    name=name,
+                    normalized_name=normalized,
+                    landmark_type=str(item.get("landmark_type") or _landmark_type(normalized)),
+                    confidence=confidence,
+                )
+            )
+
+        relations: list[SpatialRelation] = []
+        steps: list[RouteStep] = []
+        for item in data.get("route_steps", []):
+            if not self._supported_quote(item.get("evidence_quote"), transcript):
+                continue
+            try:
+                relation_type = RelationType(str(item.get("relation_type")))
+            except ValueError:
+                continue
+            landmark = normalize_name(str(item.get("landmark_name") or "")) or None
+            reference = (
+                normalize_name(str(item.get("reference_landmark_name") or "")) or None
+            )
+            if landmark and landmark not in landmark_names:
+                continue
+            if reference and reference not in landmark_names:
+                continue
+            confidence = max(
+                0.05,
+                min(0.99, float(item.get("confidence", 0.5)), average_stt),
+            )
+            instruction = re.sub(
+                r"\s+", " ", str(item.get("instruction", ""))
+            ).strip()
+            if not instruction:
+                continue
+            distance = item.get("distance_meters")
+            ordinal = item.get("ordinal")
+            steps.append(
+                RouteStep(
+                    sequence=len(steps) + 1,
+                    instruction=instruction,
+                    relation_type=relation_type,
+                    landmark_name=landmark,
+                    confidence=confidence,
+                )
+            )
+            relations.append(
+                SpatialRelation(
+                    relation_type=relation_type,
+                    subject=landmark,
+                    reference=reference or landmark,
+                    distance_meters=(int(distance) if distance is not None else None),
+                    ordinal=(int(ordinal) if ordinal is not None else None),
+                    confidence=confidence,
+                )
+            )
+
+        confidence = max(
+            0.05,
+            min(0.99, float(data.get("confidence", 0.15)), average_stt),
+        )
+        if data.get("needs_clarification"):
+            confidence = min(confidence, 0.64)
+        if not landmarks and not steps:
+            confidence = min(confidence, 0.2)
+        return ExtractedDirection(
+            raw_text=raw_text,
+            landmarks=landmarks,
+            relations=relations,
+            route_steps=steps,
+            confidence=confidence,
         )

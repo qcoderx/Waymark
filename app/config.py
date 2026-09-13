@@ -86,6 +86,8 @@ class Settings:
     elevenlabs_api_key: str | None
     elevenlabs_base_url: str
     elevenlabs_stt_model: str
+    direction_agent_enabled: bool
+    direction_agent_model: str
     care_agent_enabled: bool
     care_agent_model: str
     care_disclosure: str
@@ -175,6 +177,10 @@ class Settings:
                 "ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1"
             ).rstrip("/"),
             elevenlabs_stt_model=os.getenv("ELEVENLABS_STT_MODEL", "scribe_v2"),
+            direction_agent_enabled=_bool("DIRECTION_AGENT_ENABLED", True),
+            direction_agent_model=os.getenv(
+                "DIRECTION_AGENT_MODEL", "gpt-4.1-mini"
+            ),
             care_agent_enabled=_bool("CARE_AGENT_ENABLED", True),
             care_agent_model=os.getenv("CARE_AGENT_MODEL", "gpt-5.6-luna"),
             care_disclosure=os.getenv(
@@ -237,6 +243,6 @@ class Settings:
                     "proxy_numbers": bool(self.twilio_proxy_numbers),
                 }
             )
-        if self.care_agent_enabled:
+        if self.care_agent_enabled or self.direction_agent_enabled:
             checks["openai_agent_credentials"] = bool(self.openai_api_key)
         return checks

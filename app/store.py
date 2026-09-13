@@ -691,6 +691,37 @@ class SQLiteStore:
             )
         return utterance_id
 
+    def recent_utterances(
+        self, delivery_id: str, *, call_id: str | None = None, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Return a small chronological window for live conversation understanding."""
+
+        self.get_delivery(delivery_id)
+        where = "delivery_id = ?"
+        values: list[Any] = [delivery_id]
+        if call_id is not None:
+            where += " AND call_id = ?"
+            values.append(call_id)
+        values.append(max(1, min(limit, 20)))
+        with self._lock:
+            rows = self._connection.execute(
+                f"""
+                SELECT speaker, transcript, stt_confidence, created_at
+                FROM utterances WHERE {where}
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                values,
+            ).fetchall()
+        return [
+            {
+                "speaker": row["speaker"],
+                "transcript": row["transcript"],
+                "confidence": float(row["stt_confidence"]),
+                "created_at": row["created_at"],
+            }
+            for row in reversed(rows)
+        ]
+
     def save_resolution(
         self,
         delivery_id: str,

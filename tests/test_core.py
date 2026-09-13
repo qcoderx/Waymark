@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import unittest
 import uuid
 from dataclasses import replace
@@ -21,7 +22,7 @@ from app.domain import (
     SimulationUtterance,
 )
 from app.events import EventHub
-from app.extraction import DirectionExtractor
+from app.extraction import ConversationDirectionPlanner, DirectionExtractor
 from app.grounding import MapboxGrounder, PlaceResult
 from app.pipeline import ResolutionPipeline
 from app.store import SQLiteStore
@@ -509,6 +510,114 @@ class ExtractionTests(unittest.TestCase):
         )
         relations = {item.relation_type.value for item in result.relations}
         self.assertTrue({"pass", "turn_left", "continue", "beside"} <= relations)
+
+    def test_conversation_planner_applies_corrections_and_rejects_invention(self) -> None:
+        planner = ConversationDirectionPlanner(Settings.from_env())
+        turns = [
+            {
+                "speaker": "customer",
+                "text": "When you see the church, don't take that first left.",
+                "stt_confidence": 0.9,
+            },
+            {
+                "speaker": "rider",
+                "text": "So I keep straight?",
+                "stt_confidence": 0.91,
+            },
+            {
+                "speaker": "customer",
+                "text": (
+                    "Yes. Go past it, then the next right by Mama Titi's shop. "
+                    "The gate is opposite it."
+                ),
+                "stt_confidence": 0.92,
+            },
+        ]
+        interpretation = {
+            "intent": "delivery_guidance",
+            "landmarks": [
+                {
+                    "name": "church",
+                    "landmark_type": "church",
+                    "evidence_quote": "the church",
+                    "confidence": 0.94,
+                },
+                {
+                    "name": "Mama Titi shop",
+                    "landmark_type": "shop",
+                    "evidence_quote": "Mama Titi's shop",
+                    "confidence": 0.91,
+                },
+                {
+                    "name": "gate",
+                    "landmark_type": "gate",
+                    "evidence_quote": "The gate",
+                    "confidence": 0.88,
+                },
+                {
+                    "name": "Total filling station",
+                    "landmark_type": "filling_station",
+                    "evidence_quote": "Total filling station",
+                    "confidence": 0.99,
+                },
+            ],
+            "route_steps": [
+                {
+                    "instruction": "Continue straight past the church",
+                    "relation_type": "pass",
+                    "landmark_name": "church",
+                    "reference_landmark_name": None,
+                    "distance_meters": None,
+                    "ordinal": None,
+                    "evidence_quote": "Go past it",
+                    "confidence": 0.92,
+                },
+                {
+                    "instruction": "Take the next right by Mama Titi's shop",
+                    "relation_type": "turn_right",
+                    "landmark_name": "Mama Titi shop",
+                    "reference_landmark_name": None,
+                    "distance_meters": None,
+                    "ordinal": 1,
+                    "evidence_quote": "the next right by Mama Titi's shop",
+                    "confidence": 0.91,
+                },
+                {
+                    "instruction": "Look for the gate opposite Mama Titi's shop",
+                    "relation_type": "opposite",
+                    "landmark_name": "gate",
+                    "reference_landmark_name": "Mama Titi shop",
+                    "distance_meters": None,
+                    "ordinal": None,
+                    "evidence_quote": "The gate is opposite it",
+                    "confidence": 0.86,
+                },
+            ],
+            "confidence": 0.9,
+            "needs_clarification": False,
+        }
+        payload = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(interpretation)}
+                    ],
+                }
+            ]
+        }
+
+        result = planner._validated(payload, turns, "messy conversation")
+
+        self.assertEqual(
+            [step.relation_type.value for step in result.route_steps],
+            ["pass", "turn_right", "opposite"],
+        )
+        self.assertNotIn("turn_left", [step.relation_type.value for step in result.route_steps])
+        self.assertNotIn(
+            "total filling station",
+            [landmark.normalized_name for landmark in result.landmarks],
+        )
 
 
 class ProviderTests(unittest.TestCase):

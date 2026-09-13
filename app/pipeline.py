@@ -14,7 +14,7 @@ from .domain import (
     utc_now,
 )
 from .events import EventHub
-from .extraction import DirectionExtractor
+from .extraction import ConversationDirectionPlanner, DirectionExtractor
 from .grounding import MapboxGrounder, haversine_meters
 from .store import SQLiteStore
 
@@ -25,7 +25,10 @@ class ResolutionPipeline:
         self.store = store
         self.events = events
         self.extractor = DirectionExtractor()
+        self.direction_planner = ConversationDirectionPlanner(settings, self.extractor)
         self.grounder = MapboxGrounder(settings)
+        self._analysis_revisions: dict[str, int] = {}
+        self._applied_revisions: dict[str, int] = {}
 
     async def publish_partial(
         self,
@@ -77,7 +80,29 @@ class ResolutionPipeline:
             trace_id=trace_id,
         )
 
-        extraction = self.extractor.extract(utterance.transcript, utterance.confidence)
+        revision = self._analysis_revisions.get(delivery_id, 0) + 1
+        self._analysis_revisions[delivery_id] = revision
+        recent_turns = self.store.recent_utterances(
+            delivery_id, call_id=call_id, limit=10
+        )
+        extraction = await self.direction_planner.extract(
+            recent_turns,
+            coarse_address=delivery.coarse_address,
+        )
+        if revision < self._applied_revisions.get(delivery_id, 0):
+            existing = self.store.get_guidance(delivery_id)
+            if existing:
+                return existing
+            return Guidance(
+                delivery_id=delivery_id,
+                status="listening",
+                confidence=0.15,
+                trail=[],
+                candidates={},
+                source="live_call" if call_id else "simulated_call",
+                updated_at=utc_now(),
+            )
+        self._applied_revisions[delivery_id] = revision
         if not extraction.landmarks and not extraction.route_steps:
             existing = self.store.get_guidance(delivery_id)
             if existing:

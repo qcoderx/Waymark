@@ -388,7 +388,7 @@
       call.on('error', event => fail(event.errorMsg || 'The audio call was interrupted.'));
       await call.join({url:session.room_url,token:session.meeting_token,userName:roleNames[role]||'Participant'});
       joined=true; document.body.classList.add('in-call'); ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; ui.micState.textContent='Mic live'; setStatus('Call connected',isCare?'Speak naturally. Waymark can answer and act.':'Speak naturally. Waymark is listening for landmarks.',true); syncAllRemoteAudio();
-      flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},6000);
+      flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},3000);
       if(isCare) { ui.assistantPanel.style.display='block'; pollTimer=setInterval(pollCare,2500); pollCare(); }
       else startGuidance();
       const local=Object.values(call.participants()).find(p=>p.local); const track=local?.tracks?.audio?.persistentTrack || local?.audioTrack; if(track) captureLocalTrack(track,session.audio_websocket_url);
