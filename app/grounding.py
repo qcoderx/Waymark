@@ -82,6 +82,33 @@ class MapboxGrounder:
         candidates.sort(key=lambda item: item.confidence, reverse=True)
         return candidates[:3]
 
+    async def search_address(
+        self, query: str, center: Coordinate | None = None
+    ) -> list[PlaceResult]:
+        """Resolve a typed destination without persisting Mapbox's temporary result."""
+        if not self.settings.mapbox_access_token:
+            return []
+        params = {
+            "q": query,
+            "access_token": self.settings.mapbox_access_token,
+            "language": "en",
+            "types": "address,street,neighborhood,locality,place,district",
+            "autocomplete": "true",
+            "limit": "5",
+        }
+        if center:
+            params["proximity"] = f"{center.lng},{center.lat}"
+        landmark = LandmarkPhrase(
+            name=query,
+            normalized_name=query.lower(),
+            landmark_type="address",
+            confidence=1.0,
+        )
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            response = await client.get(self.settings.mapbox_geocoding_url, params=params)
+            response.raise_for_status()
+            return self._mapbox_results(response.json(), landmark, "mapbox_geocoding")
+
     async def _places(
         self, landmark: LandmarkPhrase, center: Coordinate
     ) -> list[PlaceResult]:
@@ -164,6 +191,7 @@ class MapboxGrounder:
                     formatted_address=(
                         properties.get("full_address")
                         or properties.get("place_formatted")
+                        or feature.get("place_name")
                     ),
                     location=Coordinate(lat=coordinates[1], lng=coordinates[0]),
                     source=source,

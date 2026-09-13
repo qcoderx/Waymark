@@ -113,6 +113,9 @@
     .invoice-grid .wide { grid-column:1/-1; }
     .currency-note { display:block; margin-top:6px; color:#746d66; font-size:8px; line-height:1.45; }
     .map-field { grid-column:1/-1; }
+    .address-entry { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+    .address-entry button { min-height:46px; padding:0 16px; border:1px solid var(--ink); border-radius:5px; color:white; background:var(--ink); font-size:10px; font-weight:900; cursor:pointer; }
+    .address-status.found { color:var(--green); font-weight:800; }
     .map-shell { position:relative; height:280px; overflow:hidden; border:1px solid var(--line); border-radius:7px; background:var(--stone); }
     #deliveryMap { position:absolute; inset:0; }
     .map-overlay { position:absolute; z-index:2; left:12px; bottom:12px; max-width:calc(100% - 24px); padding:9px 11px; border-radius:4px; color:var(--ink); background:rgba(255,255,255,.93); box-shadow:0 8px 24px rgba(23,23,22,.14); font-size:8px; font-weight:800; backdrop-filter:blur(8px); pointer-events:none; }
@@ -184,6 +187,7 @@
       .flow-arrow { display:none; }
       .form-grid,.invoice-grid { grid-template-columns:1fr; }
       .field.full,.invoice-grid .wide,.map-field { grid-column:auto; }
+      .address-entry { grid-template-columns:1fr; }
       .session-banner { align-items:flex-start; flex-direction:column; }
       .session-tools { width:100%; }
       .session-tools button { flex:1; }
@@ -281,7 +285,7 @@
               <div class="field"><label for="customerPhone">Customer phone</label><input id="customerPhone" type="tel" value="+2348022222222" required><span class="hint">Nigeria (+234) by default. Browser call links do not dial these numbers.</span></div>
               <div class="field"><label for="latitude">Approximate latitude</label><input id="latitude" type="number" step="any" value="6.5244" required></div>
               <div class="field"><label for="longitude">Approximate longitude</label><input id="longitude" type="number" step="any" value="3.3792" required></div>
-              <div class="field full"><label for="coarseAddress">Approximate address</label><input id="coarseAddress" value="Lagos, Nigeria" maxlength="500"></div>
+              <div class="field full"><label for="coarseAddress">Destination address</label><div class="address-entry"><input id="coarseAddress" value="Lagos, Nigeria" maxlength="256" autocomplete="street-address" placeholder="Type a street, area, or full address"><button id="findAddress" type="button">Find on map</button></div><span class="hint address-status" id="addressStatus" aria-live="polite">Type at least 3 characters. Waymark will place the pin automatically.</span></div>
               <div class="field map-field"><label>Destination preview</label><div class="map-shell"><div id="deliveryMap" role="application" aria-label="Interactive destination map"></div><div class="map-overlay" id="mapCoordinates">6.52440, 3.37920 · Drag the pin to refine</div></div><span class="hint">The pin follows the coordinates above. Drag it to update latitude and longitude.</span></div>
             </div>
             <div class="form-actions"><button class="primary" type="submit" id="createDelivery">Create delivery</button></div>
@@ -320,7 +324,7 @@
 
   <script>
   (() => {
-    const state = { mode:'care', customers:[], careSession:null, delivery:null, careTimer:null, deliveryTimer:null, map:null, mapMarker:null, mapLoadStarted:false };
+    const state = { mode:'care', customers:[], careSession:null, delivery:null, careTimer:null, deliveryTimer:null, map:null, mapMarker:null, mapLoadStarted:false, addressLabel:'', geocodeTimer:null, geocodeSequence:0 };
     const $ = id => document.getElementById(id);
     const feed = $('feed');
     const toast = $('toast');
@@ -340,7 +344,7 @@
       return Number.isFinite(lat)&&Number.isFinite(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180 ? {lat,lng} : null;
     }
     function updateMapLabel(location) {
-      $('mapCoordinates').textContent=location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} · Drag the pin to refine` : 'Enter valid latitude and longitude';
+      $('mapCoordinates').textContent=location ? `${state.addressLabel?state.addressLabel+' · ':''}${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} · Drag to refine` : 'Enter valid latitude and longitude';
     }
     function updateDestinationMap(animate=false) {
       const location=readDestinationCoordinates(); updateMapLabel(location);
@@ -360,11 +364,33 @@
         state.map=new mapboxgl.Map({container:'deliveryMap',style:'mapbox://styles/mapbox/streets-v12',center:[location.lng,location.lat],zoom:13});
         state.map.addControl(new mapboxgl.NavigationControl({showCompass:false}),'top-right');
         state.mapMarker=new mapboxgl.Marker({color:'#e9483f',draggable:true}).setLngLat([location.lng,location.lat]).addTo(state.map);
-        state.mapMarker.on('dragend',()=>{const point=state.mapMarker.getLngLat();$('latitude').value=point.lat.toFixed(5);$('longitude').value=point.lng.toFixed(5);updateMapLabel({lat:point.lat,lng:point.lng});});
+        state.mapMarker.on('dragend',()=>{const point=state.mapMarker.getLngLat();state.addressLabel='Custom pin';$('latitude').value=point.lat.toFixed(5);$('longitude').value=point.lng.toFixed(5);updateMapLabel({lat:point.lat,lng:point.lng});$('addressStatus').textContent='Pin moved manually. These coordinates will be saved.';$('addressStatus').classList.add('found');});
         state.map.on('load',()=>state.map.resize());
       } catch(error) {
         $('deliveryMap').innerHTML=`<div class="map-empty">${escapeHtml(error.message)} Coordinates still work without the preview.</div>`;
         $('mapCoordinates').style.display='none';
+      }
+    }
+    async function geocodeAddress() {
+      const query=$('coarseAddress').value.trim();
+      if(query.length<3){$('addressStatus').textContent='Type at least 3 characters to find an address.';$('addressStatus').classList.remove('found');return;}
+      const sequence=++state.geocodeSequence,button=$('findAddress'),location=readDestinationCoordinates();
+      button.disabled=true;button.textContent='Finding…';$('addressStatus').textContent='Looking for the closest match…';$('addressStatus').classList.remove('found');
+      try {
+        const search=new URLSearchParams({query});
+        if(location){search.set('lat',location.lat);search.set('lng',location.lng);}
+        const matches=await request(`/v1/maps/geocode?${search}`);
+        if(sequence!==state.geocodeSequence)return;
+        if(!matches.length)throw new Error('No matching address found. Add a street, area, or city and try again.');
+        const match=matches[0],point=match.location,label=match.formatted_address||match.name;
+        state.addressLabel=match.name;$('coarseAddress').value=label;$('latitude').value=point.lat.toFixed(6);$('longitude').value=point.lng.toFixed(6);
+        await ensureDeliveryMap();updateDestinationMap();
+        if(state.map)state.map.easeTo({center:[point.lng,point.lat],zoom:16,duration:700});
+        $('addressStatus').textContent=`Pinned ${label}`;$('addressStatus').classList.add('found');showToast('Address pinned on the map.');
+      } catch(error) {
+        if(sequence===state.geocodeSequence){$('addressStatus').textContent=error.message;$('addressStatus').classList.remove('found');}
+      } finally {
+        if(sequence===state.geocodeSequence){button.disabled=false;button.textContent='Find on map';}
       }
     }
     async function busy(button, work, working='Working…') {
@@ -461,7 +487,10 @@
 
     const randomOrder=()=>`WM-${new Date().toISOString().slice(0,10).replaceAll('-','')}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
     $('orderId').value=randomOrder();
-    ['latitude','longitude'].forEach(id=>$(id).addEventListener('input',()=>updateDestinationMap(true)));
+    ['latitude','longitude'].forEach(id=>$(id).addEventListener('input',()=>{state.addressLabel='';updateDestinationMap(true);}));
+    $('findAddress').addEventListener('click',()=>{clearTimeout(state.geocodeTimer);geocodeAddress();});
+    $('coarseAddress').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();clearTimeout(state.geocodeTimer);geocodeAddress();}});
+    $('coarseAddress').addEventListener('input',()=>{clearTimeout(state.geocodeTimer);state.geocodeSequence+=1;$('findAddress').disabled=false;$('findAddress').textContent='Find on map';$('addressStatus').textContent='Keep typing — the pin will update automatically.';$('addressStatus').classList.remove('found');state.geocodeTimer=setTimeout(geocodeAddress,750);});
     $('deliveryForm').addEventListener('submit',async event=>{
       event.preventDefault();
       const payload={external_order_id:$('orderId').value.trim(),rider_ref:$('riderRef').value.trim(),rider_phone:$('riderPhone').value.trim(),customer_ref:$('customerRef').value.trim(),customer_phone:$('customerPhone').value.trim(),coarse_location:{lat:Number($('latitude').value),lng:Number($('longitude').value)},coarse_address:$('coarseAddress').value.trim()||null,destination_key:$('destinationKey').value.trim()||null};

@@ -35,7 +35,9 @@ from .care import (
 from .config import Settings
 from .daily import DailyAPIError, DailyClient, create_access_token, validate_access_token
 from .domain import (
+    AddressMatch,
     CallStatus,
+    Coordinate,
     DeliveryComplete,
     DeliveryCreate,
     DeliveryOutcome,
@@ -163,6 +165,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "map_provider": settings.map_provider,
             "mapbox_public_token": token if token and token.startswith("pk.") else None,
         }
+
+    @app.get("/v1/maps/geocode", response_model=list[AddressMatch], tags=["guidance"])
+    async def geocode_address(
+        request: Request,
+        query: str = Query(min_length=3, max_length=256),
+        lat: float | None = Query(default=None, ge=-90, le=90),
+        lng: float | None = Query(default=None, ge=-180, le=180),
+    ) -> list[AddressMatch]:
+        if not settings.mapbox_access_token:
+            raise HTTPException(status_code=503, detail="Mapbox address search is not configured")
+        if ";" in query:
+            raise HTTPException(status_code=422, detail="Address cannot contain a semicolon")
+        center = Coordinate(lat=lat, lng=lng) if lat is not None and lng is not None else None
+        try:
+            matches = await request.app.state.pipeline.grounder.search_address(query, center)
+        except httpx.HTTPError as exc:
+            logger.warning("Mapbox address lookup failed: %s", exc)
+            raise HTTPException(
+                status_code=502, detail="Address search is temporarily unavailable"
+            ) from exc
+        return [
+            AddressMatch(
+                id=match.place_id,
+                name=match.name,
+                formatted_address=match.formatted_address,
+                location=match.location,
+            )
+            for match in matches
+        ]
 
     @app.post(
         "/v1/deliveries",
@@ -606,9 +637,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stream: SaharaStream | None = None
         transcript_task: asyncio.Task | None = None
 
-        async def receive_transcripts() -> None:
-            assert stream is not None
-            async for message in stream.messages():
+        async def receive_segment(active_stream: SaharaStream) -> None:
+            async for message in active_stream.messages():
                 kind = message.get("message_type")
                 if kind == "PARTIAL_TRANSCRIPT":
                     await pipeline.publish_partial(
@@ -651,6 +681,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if kind != "INPUT_ERROR":
                         return
 
+        async def start_segment() -> None:
+            nonlocal stream, transcript_task
+            if not settings.intron_api_key:
+                return
+            stream = SaharaStream(settings)
+            await stream.connect()
+            transcript_task = asyncio.create_task(receive_segment(stream))
+
+        async def finish_segment() -> None:
+            nonlocal stream, transcript_task
+            active_stream = stream
+            active_task = transcript_task
+            stream = None
+            transcript_task = None
+            if not active_stream:
+                return
+            with contextlib.suppress(Exception):
+                await active_stream.commit()
+            if active_task:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(active_task, timeout=12)
+                if not active_task.done():
+                    active_task.cancel()
+            await active_stream.close()
+
         try:
             store.update_call(grant.call_id, CallStatus.CONNECTED, consent_state="disclosed")
             await events.publish(
@@ -660,10 +715,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 call_id=grant.call_id,
                 trace_id=trace_id,
             )
-            if settings.intron_api_key:
-                stream = SaharaStream(settings)
-                await stream.connect()
-                transcript_task = asyncio.create_task(receive_transcripts())
+            await start_segment()
             while True:
                 message = await websocket.receive()
                 if message.get("type") == "websocket.disconnect":
@@ -671,7 +723,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 audio = message.get("bytes")
                 if audio and stream:
                     await stream.send_pcm16(audio, source_rate=16_000)
-                if message.get("text") == "stop":
+                command = message.get("text")
+                if command == "flush":
+                    await finish_segment()
+                    await start_segment()
+                elif command == "stop":
                     break
         except WebSocketDisconnect:
             pass
@@ -687,15 +743,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(Exception):
                 await websocket.close(code=1011)
         finally:
-            if stream:
-                with contextlib.suppress(Exception):
-                    await stream.commit()
-                if transcript_task:
-                    with contextlib.suppress(asyncio.TimeoutError):
-                        await asyncio.wait_for(transcript_task, timeout=12)
-                    if not transcript_task.done():
-                        transcript_task.cancel()
-                await stream.close()
+            await finish_segment()
 
     @app.post(
         "/v1/deliveries/{delivery_id}/proxy",

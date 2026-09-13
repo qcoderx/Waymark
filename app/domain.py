@@ -61,6 +61,13 @@ class Coordinate(BaseModel):
     lng: float = Field(ge=-180, le=180)
 
 
+class AddressMatch(BaseModel):
+    id: str | None = None
+    name: str
+    formatted_address: str | None = None
+    location: Coordinate
+
+
 class DeliveryCreate(BaseModel):
     external_order_id: str = Field(min_length=1, max_length=128)
     rider_ref: str = Field(min_length=1, max_length=128)

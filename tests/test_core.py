@@ -22,7 +22,7 @@ from app.domain import (
 )
 from app.events import EventHub
 from app.extraction import DirectionExtractor
-from app.grounding import MapboxGrounder
+from app.grounding import MapboxGrounder, PlaceResult
 from app.pipeline import ResolutionPipeline
 from app.store import SQLiteStore
 from app.stt import mulaw_to_pcm16_16khz, resample_pcm16
@@ -60,6 +60,7 @@ class APISmokeTests(unittest.TestCase):
                 self.assertIn("Create customer-care session", workspace.text)
                 self.assertIn("/v1/deliveries", workspace.text)
                 self.assertIn('id="deliveryMap"', workspace.text)
+                self.assertIn('id="findAddress"', workspace.text)
                 self.assertIn("+2348011111111", workspace.text)
 
                 ui_config = client.get("/v1/ui/config")
@@ -67,6 +68,65 @@ class APISmokeTests(unittest.TestCase):
                 self.assertEqual(
                     ui_config.json()["mapbox_public_token"], "pk.test-public"
                 )
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database_path) + suffix).unlink(missing_ok=True)
+
+    def test_address_search_pins_a_mapbox_match(self) -> None:
+        from app.main import create_app
+
+        database_path = Path("data") / f"geocode-test-{uuid.uuid4().hex}.db"
+        settings = replace(
+            Settings.from_env(),
+            database_path=database_path,
+            database_url=None,
+            demo_mode=True,
+            mapbox_access_token="pk.test-public",
+            intron_api_key=None,
+        )
+
+        async def fake_search(query: str, center: Coordinate | None):
+            self.assertEqual(query, "12 Bourdillon Road, Ikoyi")
+            self.assertEqual(center, Coordinate(lat=6.45, lng=3.43))
+            return [
+                PlaceResult(
+                    place_id="address.ikoyi",
+                    name="12 Bourdillon Road",
+                    formatted_address="12 Bourdillon Road, Ikoyi, Lagos",
+                    location=Coordinate(lat=6.4509, lng=3.4332),
+                    source="mapbox_geocoding",
+                )
+            ]
+
+        try:
+            with TestClient(create_app(settings)) as client:
+                client.app.state.pipeline.grounder.search_address = fake_search
+                response = client.get(
+                    "/v1/maps/geocode",
+                    params={
+                        "query": "12 Bourdillon Road, Ikoyi",
+                        "lat": 6.45,
+                        "lng": 3.43,
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()[0]["id"], "address.ikoyi")
+                self.assertEqual(response.json()[0]["location"]["lng"], 3.4332)
+
+                delivery = client.post(
+                    "/v1/deliveries",
+                    json={
+                        "external_order_id": "map-call-test",
+                        "rider_ref": "rider-map",
+                        "rider_phone": "+2348011111111",
+                        "customer_ref": "customer-map",
+                        "customer_phone": "+2348022222222",
+                        "coarse_location": {"lat": 6.4509, "lng": 3.4332},
+                    },
+                ).json()
+                call_page = client.get(f"/call/{delivery['id']}")
+                self.assertIn('id="guidanceMap"', call_page.text)
+                self.assertIn("waymark-route-line", call_page.text)
         finally:
             for suffix in ("", "-wal", "-shm"):
                 Path(str(database_path) + suffix).unlink(missing_ok=True)
