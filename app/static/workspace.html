@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.30.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.30.0/mapbox-gl.js"></script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23f7c94b' d='M32 60S8 42 8 24a24 24 0 1148 0c0 18-24 36-24 36Z'/%3E%3Ccircle cx='32' cy='24' r='8' fill='%23171716'/%3E%3C/svg%3E">
   <style>
     :root { --ink:#171716; --red:#e9483f; --red-deep:#a72c26; --yellow:#f7c94b; --paper:#fff; --stone:#f3efe8; --muted:#6f6861; --line:rgba(23,23,22,.15); --green:#268b64; --display:"Bricolage Grotesque",sans-serif; --body:"Manrope",sans-serif; }
@@ -47,10 +49,26 @@
 
     .panel { overflow:hidden; }
     .panel-head { padding:29px 32px; border-bottom:1px solid var(--line); }
+    .panel-head-main { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; }
+    .panel-head-copy { min-width:0; }
     .panel-head small { color:var(--red-deep); font-size:10px; font-weight:800; }
     .panel-head h2 { margin:7px 0 0; font-family:var(--display); font-size:clamp(30px,3vw,44px); letter-spacing:-.05em; line-height:1; }
     .panel-head p { max-width:670px; margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.6; }
+    .reset-action { display:none; flex:0 0 auto; min-height:39px; padding:0 14px; border:1px solid var(--line); border-radius:4px; color:var(--ink); background:white; font-size:10px; font-weight:900; cursor:pointer; }
+    .reset-action.show { display:block; }
     .panel-body { padding:30px 32px 34px; }
+    .workspace-flow { padding:22px 32px; border-bottom:1px solid var(--line); background:#fffaf3; }
+    .workspace-flow-title { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .workspace-flow-title strong { font-family:var(--display); font-size:16px; letter-spacing:-.025em; }
+    .workspace-flow-title span { color:#766f68; font-size:9px; font-weight:700; }
+    .flow-path { display:grid; grid-template-columns:1fr 34px 1.2fr 34px 1fr; align-items:center; gap:8px; margin-top:14px; }
+    .flow-node { min-height:48px; padding:10px 12px; border:1px solid var(--line); border-radius:5px; background:white; }
+    .flow-node strong,.flow-node span { display:block; }
+    .flow-node strong { font-size:10px; }
+    .flow-node span { margin-top:3px; color:#746d66; font-size:8px; line-height:1.35; }
+    .flow-node.engine { color:white; background:var(--ink); border-color:var(--ink); }
+    .flow-node.engine span { color:#d4cec7; }
+    .flow-arrow { color:var(--red); text-align:center; font-size:18px; }
     .flow { display:none; }
     .flow.active { display:block; animation:flowIn .3s ease both; }
     .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
@@ -93,6 +111,13 @@
     .speaker-row select { width:auto; min-height:32px; padding:5px 30px 5px 9px; font-size:9px; }
     .invoice-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px; }
     .invoice-grid .wide { grid-column:1/-1; }
+    .currency-note { display:block; margin-top:6px; color:#746d66; font-size:8px; line-height:1.45; }
+    .map-field { grid-column:1/-1; }
+    .map-shell { position:relative; height:280px; overflow:hidden; border:1px solid var(--line); border-radius:7px; background:var(--stone); }
+    #deliveryMap { position:absolute; inset:0; }
+    .map-overlay { position:absolute; z-index:2; left:12px; bottom:12px; max-width:calc(100% - 24px); padding:9px 11px; border-radius:4px; color:var(--ink); background:rgba(255,255,255,.93); box-shadow:0 8px 24px rgba(23,23,22,.14); font-size:8px; font-weight:800; backdrop-filter:blur(8px); pointer-events:none; }
+    .map-empty { display:grid; height:100%; place-items:center; padding:24px; color:#6f6861; font-size:10px; font-weight:700; text-align:center; }
+    .mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib { opacity:.72; }
 
     .links { display:none; margin-top:18px; padding:18px; border:1px solid rgba(233,72,63,.2); border-radius:6px; background:#fff8f7; }
     .links.show { display:block; animation:flowIn .3s ease both; }
@@ -149,8 +174,16 @@
       .mode-list { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
       .mode-button { margin:0; min-height:61px; }
       .panel-head,.panel-body { padding:22px 18px; }
+      .panel-head-main { gap:14px; }
+      .workspace-flow { padding:18px; }
+      .workspace-flow-title { align-items:flex-start; flex-direction:column; gap:4px; }
+      .flow-path { grid-template-columns:1fr 1fr; grid-template-areas:"care delivery" "engine engine"; }
+      .flow-node:first-child { grid-area:care; }
+      .flow-node.engine { grid-area:engine; }
+      .flow-node:last-child { grid-area:delivery; }
+      .flow-arrow { display:none; }
       .form-grid,.invoice-grid { grid-template-columns:1fr; }
-      .field.full,.invoice-grid .wide { grid-column:auto; }
+      .field.full,.invoice-grid .wide,.map-field { grid-column:auto; }
       .session-banner { align-items:flex-start; flex-direction:column; }
       .session-tools { width:100%; }
       .session-tools button { flex:1; }
@@ -159,6 +192,7 @@
       .call-url { grid-row:2; grid-column:1/3; }
       .activity { grid-column:1; }
       .delivery-status { grid-template-columns:1fr; }
+      .map-shell { height:240px; }
     }
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
   </style>
@@ -183,8 +217,18 @@
     </aside>
 
     <section class="panel">
+      <div class="workspace-flow" aria-label="How Waymark session types work">
+        <div class="workspace-flow-title"><strong>Two starting points. One Waymark engine.</strong><span>Choose the workflow that matches the conversation.</span></div>
+        <div class="flow-path">
+          <div class="flow-node"><strong>Customer care</strong><span>Accounts, service and business tasks</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-node engine"><strong>Waymark listens and acts</strong><span>Shared context, tools and an audit trail</span></div>
+          <div class="flow-arrow" aria-hidden="true">←</div>
+          <div class="flow-node"><strong>Delivery</strong><span>Rider, customer and live location guidance</span></div>
+        </div>
+      </div>
       <div class="flow active" id="careFlow">
-        <div class="panel-head"><small>Customer care and business</small><h2>Create customer-care session</h2><p>Attach a sandbox customer, start a shared call, and let Waymark answer or act using the conversation.</p></div>
+        <div class="panel-head"><div class="panel-head-main"><div class="panel-head-copy"><small>Customer care and business</small><h2>Create customer-care session</h2><p>Attach a sandbox customer, start a shared call, and let Waymark answer or act using the conversation.</p></div><button class="reset-action" id="newCare" type="button">+ New session</button></div></div>
         <div class="panel-body">
           <form id="careForm">
             <div class="form-grid">
@@ -199,7 +243,7 @@
           <div class="session" id="careSession">
             <div class="session-banner">
               <div class="session-title"><span class="session-check">✓</span><span><small>ACTIVE SESSION</small><strong id="careSessionId"></strong></span></div>
-              <div class="session-tools"><button class="secondary" id="createCareLinks" type="button">Create call links</button><button class="quiet" id="newCare" type="button">New session</button></div>
+              <div class="session-tools"><button class="secondary" id="createCareLinks" type="button">Create call links</button></div>
             </div>
             <div class="links" id="careLinks"></div>
             <div class="tool-tabs"><button class="tool-tab active" type="button" data-care-tool="agent">Ask the agent</button><button class="tool-tab" type="button" data-care-tool="invoice">Create invoice</button></div>
@@ -211,10 +255,10 @@
               <div class="invoice-grid">
                 <div><label for="seller">Seller</label><input id="seller" value="Bello Creative Studio"></div>
                 <div><label for="buyer">Buyer</label><input id="buyer" value="Northwind Traders"></div>
-                <div class="wide"><label for="itemDescription">Item</label><input id="itemDescription" value="Website design"></div>
+                <div class="wide"><label for="itemDescription">Item or service</label><input id="itemDescription" value="Website design" minlength="3" maxlength="300" required><span class="hint">Use a clear description that both parties will recognize.</span></div>
                 <div><label for="quantity">Quantity</label><input id="quantity" type="number" min="0.01" step="0.01" value="1"></div>
                 <div><label for="unitPrice">Unit price</label><input id="unitPrice" type="number" min="0" step="0.01" value="350000"></div>
-                <div><label for="currency">Currency</label><input id="currency" value="NGN" minlength="3" maxlength="3"></div>
+                <div><label for="currency">Currency</label><select id="currency"><option value="NGN" selected>NGN — Nigerian naira (₦)</option><option value="USD">USD — US dollar ($)</option><option value="GBP">GBP — British pound (£)</option><option value="EUR">EUR — Euro (€)</option></select><span class="currency-note">The code and full currency name appear on the PDF.</span></div>
                 <div><label for="dueDate">Due date</label><input id="dueDate" type="date"></div>
                 <div class="wide"><label for="invoiceNotes">Notes</label><input id="invoiceNotes" value="Thank you for your business."></div>
               </div>
@@ -225,19 +269,20 @@
       </div>
 
       <div class="flow" id="deliveryFlow">
-        <div class="panel-head"><small>Last-mile delivery</small><h2>Create delivery call</h2><p>Set the destination area, generate rider and customer links, and watch Waymark turn spoken landmarks into guidance.</p></div>
+        <div class="panel-head"><div class="panel-head-main"><div class="panel-head-copy"><small>Last-mile delivery</small><h2>Create delivery call</h2><p>Set the destination area, generate rider and customer links, and watch Waymark turn spoken landmarks into guidance.</p></div><button class="reset-action" id="newDelivery" type="button">+ New delivery</button></div></div>
         <div class="panel-body">
           <form id="deliveryForm">
             <div class="form-grid">
               <div class="field"><label for="orderId">Order ID</label><input id="orderId" required></div>
               <div class="field"><label for="destinationKey">Destination reference</label><input id="destinationKey" placeholder="Optional stable customer/address ID"></div>
               <div class="field"><label for="riderRef">Rider reference</label><input id="riderRef" value="rider-demo" required></div>
-              <div class="field"><label for="riderPhone">Rider phone</label><input id="riderPhone" type="tel" value="+15550001001" required><span class="hint">Use E.164 format, starting with +.</span></div>
+              <div class="field"><label for="riderPhone">Rider phone</label><input id="riderPhone" type="tel" value="+2348011111111" required><span class="hint">Nigeria (+234) by default. Use E.164 format.</span></div>
               <div class="field"><label for="customerRef">Customer reference</label><input id="customerRef" value="customer-demo" required></div>
-              <div class="field"><label for="customerPhone">Customer phone</label><input id="customerPhone" type="tel" value="+15550001002" required><span class="hint">Browser call links do not dial these numbers.</span></div>
+              <div class="field"><label for="customerPhone">Customer phone</label><input id="customerPhone" type="tel" value="+2348022222222" required><span class="hint">Nigeria (+234) by default. Browser call links do not dial these numbers.</span></div>
               <div class="field"><label for="latitude">Approximate latitude</label><input id="latitude" type="number" step="any" value="6.5244" required></div>
               <div class="field"><label for="longitude">Approximate longitude</label><input id="longitude" type="number" step="any" value="3.3792" required></div>
               <div class="field full"><label for="coarseAddress">Approximate address</label><input id="coarseAddress" value="Lagos, Nigeria" maxlength="500"></div>
+              <div class="field map-field"><label>Destination preview</label><div class="map-shell"><div id="deliveryMap" role="application" aria-label="Interactive destination map"></div><div class="map-overlay" id="mapCoordinates">6.52440, 3.37920 · Drag the pin to refine</div></div><span class="hint">The pin follows the coordinates above. Drag it to update latitude and longitude.</span></div>
             </div>
             <div class="form-actions"><button class="primary" type="submit" id="createDelivery">Create delivery</button></div>
           </form>
@@ -245,7 +290,7 @@
           <div class="session" id="deliverySession">
             <div class="session-banner">
               <div class="session-title"><span class="session-check">✓</span><span><small>ACTIVE DELIVERY</small><strong id="deliveryId"></strong></span></div>
-              <div class="session-tools"><button class="secondary" id="createDeliveryLinks" type="button">Create call links</button><button class="quiet" id="newDelivery" type="button">New delivery</button></div>
+              <div class="session-tools"><button class="secondary" id="createDeliveryLinks" type="button">Create call links</button></div>
             </div>
             <div class="links" id="deliveryLinks"></div>
             <div class="delivery-status">
@@ -275,7 +320,7 @@
 
   <script>
   (() => {
-    const state = { mode:'care', customers:[], careSession:null, delivery:null, careTimer:null, deliveryTimer:null };
+    const state = { mode:'care', customers:[], careSession:null, delivery:null, careTimer:null, deliveryTimer:null, map:null, mapMarker:null, mapLoadStarted:false };
     const $ = id => document.getElementById(id);
     const feed = $('feed');
     const toast = $('toast');
@@ -290,6 +335,38 @@
       if (!response.ok) throw new Error(body?.detail || `Request failed (${response.status})`);
       return body;
     }
+    function readDestinationCoordinates() {
+      const lat=Number($('latitude').value), lng=Number($('longitude').value);
+      return Number.isFinite(lat)&&Number.isFinite(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180 ? {lat,lng} : null;
+    }
+    function updateMapLabel(location) {
+      $('mapCoordinates').textContent=location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} · Drag the pin to refine` : 'Enter valid latitude and longitude';
+    }
+    function updateDestinationMap(animate=false) {
+      const location=readDestinationCoordinates(); updateMapLabel(location);
+      if(!location||!state.map||!state.mapMarker)return;
+      state.mapMarker.setLngLat([location.lng,location.lat]);
+      if(animate)state.map.easeTo({center:[location.lng,location.lat],duration:450});
+    }
+    async function ensureDeliveryMap() {
+      if(state.map){state.map.resize();updateDestinationMap();return;}
+      if(state.mapLoadStarted)return;
+      state.mapLoadStarted=true;
+      try {
+        const config=await request('/v1/ui/config');
+        if(!config.mapbox_public_token||!window.mapboxgl)throw new Error('Map preview is not configured.');
+        mapboxgl.accessToken=config.mapbox_public_token;
+        const location=readDestinationCoordinates()||{lat:6.5244,lng:3.3792};
+        state.map=new mapboxgl.Map({container:'deliveryMap',style:'mapbox://styles/mapbox/streets-v12',center:[location.lng,location.lat],zoom:13});
+        state.map.addControl(new mapboxgl.NavigationControl({showCompass:false}),'top-right');
+        state.mapMarker=new mapboxgl.Marker({color:'#e9483f',draggable:true}).setLngLat([location.lng,location.lat]).addTo(state.map);
+        state.mapMarker.on('dragend',()=>{const point=state.mapMarker.getLngLat();$('latitude').value=point.lat.toFixed(5);$('longitude').value=point.lng.toFixed(5);updateMapLabel({lat:point.lat,lng:point.lng});});
+        state.map.on('load',()=>state.map.resize());
+      } catch(error) {
+        $('deliveryMap').innerHTML=`<div class="map-empty">${escapeHtml(error.message)} Coordinates still work without the preview.</div>`;
+        $('mapCoordinates').style.display='none';
+      }
+    }
     async function busy(button, work, working='Working…') {
       const label=button.textContent; button.disabled=true; button.textContent=working;
       try { return await work(); } catch(error) { showToast(error.message,true); throw error; }
@@ -300,6 +377,7 @@
       document.querySelectorAll('.mode-button').forEach(button=>button.classList.toggle('active',button.dataset.mode===mode));
       $('careFlow').classList.toggle('active',mode==='care');
       $('deliveryFlow').classList.toggle('active',mode==='delivery');
+      if(mode==='delivery')setTimeout(ensureDeliveryMap,0);
       if(mode==='care' && state.careSession) refreshCareTimeline();
       else if(mode==='delivery' && state.delivery) refreshDeliveryTimeline();
       else feed.innerHTML='<div class="empty">Create a session to start the activity timeline.</div>';
@@ -330,11 +408,11 @@
       event.preventDefault();
       try {
         const session=await busy($('createCare'),()=>request('/v1/care/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vertical:$('vertical').value,organization:$('organization').value.trim(),customer_id:$('customer').value||null,subject:$('subject').value.trim()})}),'Creating…');
-        state.careSession=session; $('careSessionId').textContent=session.id; $('careSession').classList.add('show'); $('careLinks').classList.remove('show');
+        state.careSession=session; $('careSessionId').textContent=session.id; $('careSession').classList.add('show'); $('careLinks').classList.remove('show'); $('newCare').classList.add('show');
         clearInterval(state.careTimer); state.careTimer=setInterval(refreshCareTimeline,3500); await refreshCareTimeline(); showToast('Customer-care session created.');
       } catch (_) {}
     });
-    $('newCare').addEventListener('click',()=>{ state.careSession=null; $('careSession').classList.remove('show'); clearInterval(state.careTimer); feed.innerHTML='<div class="empty">Create a session to start the activity timeline.</div>'; });
+    $('newCare').addEventListener('click',()=>{ state.careSession=null; $('careSession').classList.remove('show'); $('newCare').classList.remove('show'); clearInterval(state.careTimer); feed.innerHTML='<div class="empty">Create a session to start the activity timeline.</div>'; $('vertical').focus(); });
 
     function renderCallLinks(container, links, expiresAt) {
       container.innerHTML=`<div class="links-head"><div><h3>Participant links are ready</h3><p>Each private link expires ${escapeHtml(new Date(expiresAt).toLocaleString())}.</p></div></div><div class="link-list">${Object.entries(links).map(([role,url])=>`<div class="call-link"><span class="call-role">${escapeHtml(role)}</span><span class="call-url">${escapeHtml(url)}</span><button class="mini-button copy-link" type="button" data-url="${escapeHtml(url)}">Copy</button><a class="mini-button open" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open call</a></div>`).join('')}</div>`;
@@ -358,7 +436,10 @@
     });
     $('createInvoice').addEventListener('click',async()=>{
       if(!state.careSession)return;
-      const payload={seller:$('seller').value.trim(),buyer:$('buyer').value.trim(),currency:$('currency').value.trim().toUpperCase(),items:[{description:$('itemDescription').value.trim(),quantity:Number($('quantity').value),unit_price:Number($('unitPrice').value)}],due_date:$('dueDate').value||null,notes:$('invoiceNotes').value.trim()||null};
+      const item=$('itemDescription'),description=item.value.trim(),meaningful=new Set([...description.toLowerCase()].filter(character=>/[a-z0-9]/.test(character)));
+      item.setCustomValidity(description.length>=3&&meaningful.size>=3?'':'Describe the actual product or service being invoiced.');
+      if(!item.reportValidity())return;
+      const payload={seller:$('seller').value.trim(),buyer:$('buyer').value.trim(),currency:$('currency').value,items:[{description,quantity:Number($('quantity').value),unit_price:Number($('unitPrice').value)}],due_date:$('dueDate').value||null,notes:$('invoiceNotes').value.trim()||null};
       try { await busy($('createInvoice'),()=>request(`/v1/care/sessions/${state.careSession.id}/invoices`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),'Generating PDF…'); await refreshCareTimeline(); showToast('Invoice created and ready to download.'); }
       catch (_) {}
     });
@@ -380,13 +461,14 @@
 
     const randomOrder=()=>`WM-${new Date().toISOString().slice(0,10).replaceAll('-','')}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
     $('orderId').value=randomOrder();
+    ['latitude','longitude'].forEach(id=>$(id).addEventListener('input',()=>updateDestinationMap(true)));
     $('deliveryForm').addEventListener('submit',async event=>{
       event.preventDefault();
       const payload={external_order_id:$('orderId').value.trim(),rider_ref:$('riderRef').value.trim(),rider_phone:$('riderPhone').value.trim(),customer_ref:$('customerRef').value.trim(),customer_phone:$('customerPhone').value.trim(),coarse_location:{lat:Number($('latitude').value),lng:Number($('longitude').value)},coarse_address:$('coarseAddress').value.trim()||null,destination_key:$('destinationKey').value.trim()||null};
-      try { const delivery=await busy($('createDelivery'),()=>request('/v1/deliveries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),'Creating…'); state.delivery=delivery; $('deliveryId').textContent=delivery.id; $('deliveryState').textContent=titleCase(delivery.status); $('knownRoute').textContent=delivery.known_route_available?'Available':'Learning on this call'; $('finalLatitude').value=delivery.coarse_location.lat; $('finalLongitude').value=delivery.coarse_location.lng; $('deliverySession').classList.add('show'); $('deliveryLinks').classList.remove('show'); clearInterval(state.deliveryTimer); state.deliveryTimer=setInterval(refreshDeliveryTimeline,3500); await refreshDeliveryTimeline(); showToast('Delivery created.'); }
+      try { const delivery=await busy($('createDelivery'),()=>request('/v1/deliveries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),'Creating…'); state.delivery=delivery; $('deliveryId').textContent=delivery.id; $('deliveryState').textContent=titleCase(delivery.status); $('knownRoute').textContent=delivery.known_route_available?'Available':'Learning on this call'; $('finalLatitude').value=delivery.coarse_location.lat; $('finalLongitude').value=delivery.coarse_location.lng; $('deliverySession').classList.add('show'); $('deliveryLinks').classList.remove('show'); $('newDelivery').classList.add('show'); clearInterval(state.deliveryTimer); state.deliveryTimer=setInterval(refreshDeliveryTimeline,3500); await refreshDeliveryTimeline(); showToast('Delivery created.'); }
       catch (_) {}
     });
-    $('newDelivery').addEventListener('click',()=>{state.delivery=null;$('deliverySession').classList.remove('show');$('orderId').value=randomOrder();clearInterval(state.deliveryTimer);feed.innerHTML='<div class="empty">Create a delivery to start the activity timeline.</div>';});
+    $('newDelivery').addEventListener('click',()=>{state.delivery=null;$('deliverySession').classList.remove('show');$('newDelivery').classList.remove('show');$('orderId').value=randomOrder();clearInterval(state.deliveryTimer);feed.innerHTML='<div class="empty">Create a delivery to start the activity timeline.</div>';$('orderId').focus();});
     $('createDeliveryLinks').addEventListener('click',async()=>{
       if(!state.delivery)return;
       try { const result=await busy($('createDeliveryLinks'),()=>request(`/v1/deliveries/${state.delivery.id}/webrtc`,{method:'POST'}),'Creating room…'); renderCallLinks($('deliveryLinks'),{rider:result.rider_url,customer:result.customer_url},result.expires_at); showToast('Rider and customer call links are ready.'); }

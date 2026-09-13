@@ -156,6 +156,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def workspace_page() -> FileResponse:
         return FileResponse(Path(__file__).parent / "static" / "workspace.html")
 
+    @app.get("/v1/ui/config", include_in_schema=False)
+    async def ui_config() -> dict[str, str | None]:
+        token = settings.mapbox_access_token
+        return {
+            "map_provider": settings.map_provider,
+            "mapbox_public_token": token if token and token.startswith("pk.") else None,
+        }
+
     @app.post(
         "/v1/deliveries",
         response_model=DeliverySession,

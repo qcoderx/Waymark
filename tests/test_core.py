@@ -44,7 +44,7 @@ class APISmokeTests(unittest.TestCase):
             database_path=database_path,
             database_url=None,
             care_agent_enabled=False,
-            mapbox_access_token=None,
+            mapbox_access_token="pk.test-public",
             intron_api_key=None,
         )
         try:
@@ -59,6 +59,14 @@ class APISmokeTests(unittest.TestCase):
                 self.assertEqual(workspace.status_code, 200)
                 self.assertIn("Create customer-care session", workspace.text)
                 self.assertIn("/v1/deliveries", workspace.text)
+                self.assertIn('id="deliveryMap"', workspace.text)
+                self.assertIn("+2348011111111", workspace.text)
+
+                ui_config = client.get("/v1/ui/config")
+                self.assertEqual(ui_config.status_code, 200)
+                self.assertEqual(
+                    ui_config.json()["mapbox_public_token"], "pk.test-public"
+                )
         finally:
             for suffix in ("", "-wal", "-shm"):
                 Path(str(database_path) + suffix).unlink(missing_ok=True)
@@ -224,6 +232,22 @@ class APISmokeTests(unittest.TestCase):
                 self.assertEqual(download.status_code, 200)
                 self.assertTrue(download.content.startswith(b"%PDF"))
                 self.assertIn("attachment", download.headers["content-disposition"])
+                invalid = client.post(
+                    f"/v1/care/sessions/{session['id']}/invoices",
+                    json={
+                        "seller": "Bello Creative Studio",
+                        "buyer": "Northwind Traders",
+                        "currency": "NGN",
+                        "items": [
+                            {
+                                "description": "Rarrrrrrrrr",
+                                "quantity": 1,
+                                "unit_price": 350000,
+                            }
+                        ],
+                    },
+                )
+                self.assertEqual(invalid.status_code, 422)
         finally:
             for suffix in ("", "-wal", "-shm"):
                 Path(str(database_path) + suffix).unlink(missing_ok=True)

@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -152,9 +152,21 @@ class ActionConfirmation(BaseModel):
 
 
 class InvoiceLine(BaseModel):
-    description: str = Field(min_length=1, max_length=300)
+    description: str = Field(min_length=3, max_length=300)
     quantity: float = Field(gt=0)
     unit_price: float = Field(ge=0)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        meaningful = {
+            character.casefold() for character in normalized if character.isalnum()
+        }
+        letter_count = sum(character.isalpha() for character in normalized)
+        if len(meaningful) < 3 or letter_count < 3:
+            raise ValueError("describe the actual product or service being invoiced")
+        return normalized
 
 
 class InvoiceCreate(BaseModel):
@@ -164,6 +176,14 @@ class InvoiceCreate(BaseModel):
     items: list[InvoiceLine] = Field(min_length=1, max_length=50)
     due_date: date | None = None
     notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not normalized.isalpha():
+            raise ValueError("currency must be a three-letter code")
+        return normalized
 
 
 CARE_SCHEMA = """
@@ -717,10 +737,10 @@ class InvoiceDocument:
             title=f"Invoice {invoice_number}",
         )
         styles = getSampleStyleSheet()
-        ink = colors.HexColor("#071A28")
-        yellow = colors.HexColor("#FFC928")
-        lagoon = colors.HexColor("#0CA6A0")
-        muted = colors.HexColor("#60727D")
+        ink = colors.HexColor("#171716")
+        yellow = colors.HexColor("#F7C94B")
+        red = colors.HexColor("#E9483F")
+        muted = colors.HexColor("#625C56")
         story: list[Any] = []
         heading = ParagraphStyle(
             "InvoiceHeading",
@@ -743,7 +763,7 @@ class InvoiceDocument:
             "Label",
             parent=styles["BodyText"],
             fontName="Helvetica-Bold",
-            textColor=lagoon,
+            textColor=red,
             fontSize=8,
             leading=10,
             spaceAfter=2 * mm,
@@ -783,12 +803,19 @@ class InvoiceDocument:
         )
         story.extend([header, Spacer(1, 9 * mm)])
         due = invoice.due_date.isoformat() if invoice.due_date else "Due on receipt"
+        currency_names = {
+            "NGN": "Nigerian naira (NGN)",
+            "USD": "US dollar (USD)",
+            "GBP": "British pound (GBP)",
+            "EUR": "Euro (EUR)",
+        }
+        currency_label = currency_names.get(invoice.currency, invoice.currency)
         parties = Table(
             [
                 [Paragraph("FROM", label), Paragraph("BILL TO", label)],
                 [Paragraph(invoice.seller, body), Paragraph(invoice.buyer, body)],
-                [Paragraph("Payment terms", label), Paragraph("Due date", label)],
-                [Paragraph("Standard", body), Paragraph(due, body)],
+                [Paragraph("CURRENCY", label), Paragraph("DUE DATE", label)],
+                [Paragraph(currency_label, body), Paragraph(due, body)],
             ],
             colWidths=[85 * mm, 85 * mm],
         )
