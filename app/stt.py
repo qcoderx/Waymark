@@ -1,14 +1,40 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import struct
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from urllib.parse import urlencode
 
 import websockets
 
 from .config import Settings
+
+
+SAHARA_TERMINAL_MESSAGES = {
+    "COMMITTED_TRANSCRIPT",
+    "ERROR",
+    "INPUT_ERROR",
+    "AUTHENTICATION_ERROR",
+    "RESOURCE_EXHAUSTED",
+    "QUOTA_EXCEEDED",
+    "INSUFFICIENT_AUDIO_ACTIVITY",
+    "SESSION_TIME_LIMIT_EXCEEDED",
+}
+
+
+def pcm16_has_speech(payload: bytes, rms_threshold: int = 180) -> bool:
+    """Reject silent microphone windows before opening a metered STT session."""
+
+    usable = len(payload) - len(payload) % 2
+    if usable < 2:
+        return False
+    samples = struct.unpack(f"<{usable // 2}h", payload[:usable])
+    stride = max(1, len(samples) // 8_000)
+    sampled = samples[::stride]
+    mean_square = sum(sample * sample for sample in sampled) / len(sampled)
+    return mean_square >= rms_threshold * rms_threshold
 
 
 def mulaw_to_pcm16_16khz(payload: bytes) -> bytes:
@@ -133,3 +159,29 @@ class SaharaStream:
     async def close(self) -> None:
         if self._socket is not None:
             await self._socket.close()
+
+
+async def transcribe_pcm16_segment(
+    settings: Settings,
+    payload: bytes,
+    lock: asyncio.Lock,
+    on_message: Callable[[dict], Awaitable[None]],
+) -> bool:
+    """Transcribe one speech window while serializing Sahara sessions per worker."""
+
+    if not settings.intron_api_key or not pcm16_has_speech(payload):
+        return False
+    async with lock:
+        stream = SaharaStream(settings)
+        await stream.connect()
+        try:
+            await stream.send_pcm16(payload, source_rate=16_000)
+            await stream.commit()
+            async with asyncio.timeout(15):
+                async for message in stream.messages():
+                    await on_message(message)
+                    if message.get("message_type") in SAHARA_TERMINAL_MESSAGES:
+                        break
+        finally:
+            await stream.close()
+    return True

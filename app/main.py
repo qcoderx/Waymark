@@ -56,7 +56,7 @@ from .domain import (
 from .events import EventHub
 from .pipeline import ResolutionPipeline
 from .store import ConflictError, NotFoundError, PostgresStore, SQLiteStore
-from .stt import SaharaStream
+from .stt import SaharaStream, transcribe_pcm16_segment
 from .telephony import (
     InfobipTelephony,
     TwilioTelephony,
@@ -100,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.twilio = TwilioTelephony(settings)
         app.state.infobip = InfobipTelephony(settings)
         app.state.daily = DailyClient(settings)
+        app.state.sahara_transcription_lock = asyncio.Lock()
         yield
         store.close()
 
@@ -424,73 +425,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await websocket.close(code=4403, reason="invalid or expired call link")
             return
         await websocket.accept()
-        stream: SaharaStream | None = None
-        transcript_task: asyncio.Task | None = None
+        audio_buffer = bytearray()
+        segment_tasks: set[asyncio.Task] = set()
         agent_tasks: set[asyncio.Task] = set()
 
-        async def receive_segment(active_stream: SaharaStream) -> None:
-            async for message in active_stream.messages():
-                kind = message.get("message_type")
-                if kind == "COMMITTED_TRANSCRIPT":
-                    transcript = message.get("transcript_text", "").strip()
-                    if transcript:
-                        task = asyncio.create_task(
-                            websocket.app.state.care_agent.process_turn(
-                                session_id,
-                                CareTurnCreate(speaker=role, text=transcript),
-                            )
-                        )
-                        agent_tasks.add(task)
-                        task.add_done_callback(agent_tasks.discard)
-                    return
-                if kind in {
-                    "ERROR",
-                    "AUTHENTICATION_ERROR",
-                    "RESOURCE_EXHAUSTED",
-                    "QUOTA_EXCEEDED",
-                    "INSUFFICIENT_AUDIO_ACTIVITY",
-                    "SESSION_TIME_LIMIT_EXCEEDED",
-                }:
-                    return
-
-        async def start_segment() -> None:
-            nonlocal stream, transcript_task
-            if not settings.intron_api_key:
+        async def handle_transcript(message: dict) -> None:
+            if message.get("message_type") != "COMMITTED_TRANSCRIPT":
                 return
-            stream = SaharaStream(settings)
-            await stream.connect()
-            transcript_task = asyncio.create_task(receive_segment(stream))
+            transcript = message.get("transcript_text", "").strip()
+            if transcript:
+                task = asyncio.create_task(
+                    websocket.app.state.care_agent.process_turn(
+                        session_id, CareTurnCreate(speaker=role, text=transcript)
+                    )
+                )
+                agent_tasks.add(task)
+                task.add_done_callback(agent_tasks.discard)
 
-        async def finish_segment() -> None:
-            nonlocal stream, transcript_task
-            active_stream = stream
-            active_task = transcript_task
-            stream = None
-            transcript_task = None
-            if not active_stream:
+        async def process_segment(payload: bytes) -> None:
+            try:
+                await transcribe_pcm16_segment(
+                    settings,
+                    payload,
+                    websocket.app.state.sahara_transcription_lock,
+                    handle_transcript,
+                )
+            except Exception:
+                logger.exception("customer-care speech segment failed")
+
+        def queue_segment() -> None:
+            if not audio_buffer:
                 return
-            with contextlib.suppress(Exception):
-                await active_stream.commit()
-            if active_task:
-                with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(active_task, timeout=12)
-                if not active_task.done():
-                    active_task.cancel()
-            await active_stream.close()
+            payload = bytes(audio_buffer)
+            audio_buffer.clear()
+            task = asyncio.create_task(process_segment(payload))
+            segment_tasks.add(task)
+            task.add_done_callback(segment_tasks.discard)
 
         try:
-            await start_segment()
             while True:
                 message = await websocket.receive()
                 if message.get("type") == "websocket.disconnect":
                     break
                 audio = message.get("bytes")
-                if audio and stream:
-                    await stream.send_pcm16(audio, source_rate=16_000)
+                if audio:
+                    audio_buffer.extend(audio)
                 command = message.get("text")
                 if command == "flush":
-                    await finish_segment()
-                    await start_segment()
+                    queue_segment()
                 elif command == "stop":
                     break
         except WebSocketDisconnect:
@@ -500,7 +482,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(Exception):
                 await websocket.close(code=1011)
         finally:
-            await finish_segment()
+            queue_segment()
+            if segment_tasks:
+                _, pending = await asyncio.wait(segment_tasks, timeout=20)
+                for task in pending:
+                    task.cancel()
 
     @app.get("/v1/deliveries", response_model=list[DeliverySession], tags=["deliveries"])
     async def list_deliveries(
@@ -643,84 +629,84 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         events: EventHub = websocket.app.state.events
         pipeline: ResolutionPipeline = websocket.app.state.pipeline
         trace_id = f"trace_{uuid.uuid4().hex}"
-        stream: SaharaStream | None = None
-        transcript_task: asyncio.Task | None = None
+        audio_buffer = bytearray()
+        segment_tasks: set[asyncio.Task] = set()
         analysis_tasks: set[asyncio.Task] = set()
 
-        async def receive_segment(active_stream: SaharaStream) -> None:
-            async for message in active_stream.messages():
-                kind = message.get("message_type")
-                if kind == "PARTIAL_TRANSCRIPT":
-                    await pipeline.publish_partial(
-                        delivery_id,
-                        message.get("transcript", ""),
-                        call_id=grant.call_id,
-                        trace_id=trace_id,
-                    )
-                elif kind == "COMMITTED_TRANSCRIPT":
-                    transcript = message.get("transcript_text", "").strip()
-                    if transcript:
-                        task = asyncio.create_task(
-                            pipeline.process_utterance(
-                                delivery_id,
-                                SimulationUtterance(
-                                    transcript=transcript,
-                                    speaker=role,
-                                    confidence=0.88,
-                                    timestamp_ms=int(
-                                        float(message.get("audio_len", 0)) * 1000
-                                    ),
-                                    language_mix=[settings.intron_language, "en"],
+        async def handle_transcript(message: dict) -> None:
+            kind = message.get("message_type")
+            if kind == "PARTIAL_TRANSCRIPT":
+                await pipeline.publish_partial(
+                    delivery_id,
+                    message.get("transcript", ""),
+                    call_id=grant.call_id,
+                    trace_id=trace_id,
+                )
+            elif kind == "COMMITTED_TRANSCRIPT":
+                transcript = message.get("transcript_text", "").strip()
+                if transcript:
+                    task = asyncio.create_task(
+                        pipeline.process_utterance(
+                            delivery_id,
+                            SimulationUtterance(
+                                transcript=transcript,
+                                speaker=role,
+                                confidence=0.88,
+                                timestamp_ms=int(
+                                    float(message.get("audio_len", 0)) * 1000
                                 ),
-                                call_id=grant.call_id,
-                                trace_id=trace_id,
-                            )
+                                language_mix=[settings.intron_language, "en"],
+                            ),
+                            call_id=grant.call_id,
+                            trace_id=trace_id,
                         )
-                        analysis_tasks.add(task)
-                        task.add_done_callback(analysis_tasks.discard)
-                    return
-                elif kind in {
-                    "ERROR",
-                    "INPUT_ERROR",
-                    "AUTHENTICATION_ERROR",
-                    "RESOURCE_EXHAUSTED",
-                    "QUOTA_EXCEEDED",
-                    "SESSION_TIME_LIMIT_EXCEEDED",
-                }:
-                    await events.publish(
-                        EventType.ERROR,
-                        delivery_id,
-                        {"stage": "stt", "provider": "sahara", "detail": message},
-                        call_id=grant.call_id,
-                        trace_id=trace_id,
                     )
-                    if kind != "INPUT_ERROR":
-                        return
+                    analysis_tasks.add(task)
+                    task.add_done_callback(analysis_tasks.discard)
+            elif kind in {
+                "ERROR",
+                "INPUT_ERROR",
+                "AUTHENTICATION_ERROR",
+                "RESOURCE_EXHAUSTED",
+                "QUOTA_EXCEEDED",
+                "SESSION_TIME_LIMIT_EXCEEDED",
+            }:
+                await events.publish(
+                    EventType.ERROR,
+                    delivery_id,
+                    {"stage": "stt", "provider": "sahara", "detail": message},
+                    call_id=grant.call_id,
+                    trace_id=trace_id,
+                )
 
-        async def start_segment() -> None:
-            nonlocal stream, transcript_task
-            if not settings.intron_api_key:
-                return
-            stream = SaharaStream(settings)
-            await stream.connect()
-            transcript_task = asyncio.create_task(receive_segment(stream))
+        async def process_segment(payload: bytes) -> None:
+            try:
+                await transcribe_pcm16_segment(
+                    settings,
+                    payload,
+                    websocket.app.state.sahara_transcription_lock,
+                    handle_transcript,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Daily speech segment failed", extra={"call_id": grant.call_id}
+                )
+                await events.publish(
+                    EventType.ERROR,
+                    delivery_id,
+                    {"stage": "stt", "provider": "sahara", "message": str(exc)},
+                    call_id=grant.call_id,
+                    trace_id=trace_id,
+                )
 
-        async def finish_segment() -> None:
-            nonlocal stream, transcript_task
-            active_stream = stream
-            active_task = transcript_task
-            stream = None
-            transcript_task = None
-            if not active_stream:
+        def queue_segment() -> None:
+            if not audio_buffer:
                 return
-            with contextlib.suppress(Exception):
-                await active_stream.commit()
-            if active_task:
-                with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(active_task, timeout=12)
-                if not active_task.done():
-                    active_task.cancel()
-            await active_stream.close()
+            payload = bytes(audio_buffer)
+            audio_buffer.clear()
+            task = asyncio.create_task(process_segment(payload))
+            segment_tasks.add(task)
+            task.add_done_callback(segment_tasks.discard)
 
         try:
             store.update_call(grant.call_id, CallStatus.CONNECTED, consent_state="disclosed")
@@ -731,18 +717,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 call_id=grant.call_id,
                 trace_id=trace_id,
             )
-            await start_segment()
             while True:
                 message = await websocket.receive()
                 if message.get("type") == "websocket.disconnect":
                     break
                 audio = message.get("bytes")
-                if audio and stream:
-                    await stream.send_pcm16(audio, source_rate=16_000)
+                if audio:
+                    audio_buffer.extend(audio)
                 command = message.get("text")
                 if command == "flush":
-                    await finish_segment()
-                    await start_segment()
+                    queue_segment()
                 elif command == "stop":
                     break
         except WebSocketDisconnect:
@@ -759,7 +743,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(Exception):
                 await websocket.close(code=1011)
         finally:
-            await finish_segment()
+            queue_segment()
+            if segment_tasks:
+                _, pending = await asyncio.wait(segment_tasks, timeout=20)
+                for task in pending:
+                    task.cancel()
 
     @app.post(
         "/v1/deliveries/{delivery_id}/proxy",
