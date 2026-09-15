@@ -56,7 +56,7 @@ from .domain import (
 from .events import EventHub
 from .pipeline import ResolutionPipeline
 from .store import ConflictError, NotFoundError, PostgresStore, SQLiteStore
-from .stt import SaharaStream, transcribe_pcm16_segment
+from .stt import SaharaStream, transcribe_pcm16_file_segment
 from .telephony import (
     InfobipTelephony,
     TwilioTelephony,
@@ -100,7 +100,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.twilio = TwilioTelephony(settings)
         app.state.infobip = InfobipTelephony(settings)
         app.state.daily = DailyClient(settings)
-        app.state.sahara_transcription_lock = asyncio.Lock()
         yield
         store.close()
 
@@ -429,27 +428,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         segment_tasks: set[asyncio.Task] = set()
         agent_tasks: set[asyncio.Task] = set()
 
-        async def handle_transcript(message: dict) -> None:
-            if message.get("message_type") != "COMMITTED_TRANSCRIPT":
-                return
-            transcript = message.get("transcript_text", "").strip()
-            if transcript:
-                task = asyncio.create_task(
-                    websocket.app.state.care_agent.process_turn(
-                        session_id, CareTurnCreate(speaker=role, text=transcript)
-                    )
-                )
-                agent_tasks.add(task)
-                task.add_done_callback(agent_tasks.discard)
-
         async def process_segment(payload: bytes) -> None:
             try:
-                await transcribe_pcm16_segment(
-                    settings,
-                    payload,
-                    websocket.app.state.sahara_transcription_lock,
-                    handle_transcript,
-                )
+                transcript = await transcribe_pcm16_file_segment(settings, payload)
+                if transcript:
+                    task = asyncio.create_task(
+                        websocket.app.state.care_agent.process_turn(
+                            session_id, CareTurnCreate(speaker=role, text=transcript)
+                        )
+                    )
+                    agent_tasks.add(task)
+                    task.add_done_callback(agent_tasks.discard)
             except Exception:
                 logger.exception("customer-care speech segment failed")
 
@@ -633,60 +622,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         segment_tasks: set[asyncio.Task] = set()
         analysis_tasks: set[asyncio.Task] = set()
 
-        async def handle_transcript(message: dict) -> None:
-            kind = message.get("message_type")
-            if kind == "PARTIAL_TRANSCRIPT":
-                await pipeline.publish_partial(
-                    delivery_id,
-                    message.get("transcript", ""),
-                    call_id=grant.call_id,
-                    trace_id=trace_id,
-                )
-            elif kind == "COMMITTED_TRANSCRIPT":
-                transcript = message.get("transcript_text", "").strip()
-                if transcript:
-                    task = asyncio.create_task(
-                        pipeline.process_utterance(
-                            delivery_id,
-                            SimulationUtterance(
-                                transcript=transcript,
-                                speaker=role,
-                                confidence=0.88,
-                                timestamp_ms=int(
-                                    float(message.get("audio_len", 0)) * 1000
-                                ),
-                                language_mix=[settings.intron_language, "en"],
-                            ),
-                            call_id=grant.call_id,
-                            trace_id=trace_id,
-                        )
-                    )
-                    analysis_tasks.add(task)
-                    task.add_done_callback(analysis_tasks.discard)
-            elif kind in {
-                "ERROR",
-                "INPUT_ERROR",
-                "AUTHENTICATION_ERROR",
-                "RESOURCE_EXHAUSTED",
-                "QUOTA_EXCEEDED",
-                "SESSION_TIME_LIMIT_EXCEEDED",
-            }:
-                await events.publish(
-                    EventType.ERROR,
-                    delivery_id,
-                    {"stage": "stt", "provider": "sahara", "detail": message},
-                    call_id=grant.call_id,
-                    trace_id=trace_id,
-                )
-
         async def process_segment(payload: bytes) -> None:
             try:
-                await transcribe_pcm16_segment(
-                    settings,
-                    payload,
-                    websocket.app.state.sahara_transcription_lock,
-                    handle_transcript,
+                transcript = await transcribe_pcm16_file_segment(settings, payload)
+                if not transcript:
+                    return
+                await pipeline.publish_partial(
+                    delivery_id,
+                    transcript,
+                    call_id=grant.call_id,
+                    trace_id=trace_id,
                 )
+                task = asyncio.create_task(
+                    pipeline.process_utterance(
+                        delivery_id,
+                        SimulationUtterance(
+                            transcript=transcript,
+                            speaker=role,
+                            confidence=0.88,
+                            timestamp_ms=int(len(payload) / 32),
+                            language_mix=[settings.intron_language, "en"],
+                        ),
+                        call_id=grant.call_id,
+                        trace_id=trace_id,
+                    )
+                )
+                analysis_tasks.add(task)
+                task.add_done_callback(analysis_tasks.discard)
             except Exception as exc:
                 logger.exception(
                     "Daily speech segment failed", extra={"call_id": grant.call_id}

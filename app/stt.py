@@ -1,27 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 import base64
+import io
 import json
 import struct
-from collections.abc import AsyncIterator, Awaitable, Callable
+import wave
+from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
+import httpx
 import websockets
 
 from .config import Settings
-
-
-SAHARA_TERMINAL_MESSAGES = {
-    "COMMITTED_TRANSCRIPT",
-    "ERROR",
-    "INPUT_ERROR",
-    "AUTHENTICATION_ERROR",
-    "RESOURCE_EXHAUSTED",
-    "QUOTA_EXCEEDED",
-    "INSUFFICIENT_AUDIO_ACTIVITY",
-    "SESSION_TIME_LIMIT_EXCEEDED",
-}
 
 
 def pcm16_has_speech(payload: bytes, rms_threshold: int = 180) -> bool:
@@ -161,27 +151,39 @@ class SaharaStream:
             await self._socket.close()
 
 
-async def transcribe_pcm16_segment(
-    settings: Settings,
-    payload: bytes,
-    lock: asyncio.Lock,
-    on_message: Callable[[dict], Awaitable[None]],
-) -> bool:
-    """Transcribe one speech window while serializing Sahara sessions per worker."""
+async def transcribe_pcm16_file_segment(settings: Settings, payload: bytes) -> str | None:
+    """Transcribe one speech window through Sahara's concurrency-safe file API."""
 
     if not settings.intron_api_key or not pcm16_has_speech(payload):
-        return False
-    async with lock:
-        stream = SaharaStream(settings)
-        await stream.connect()
-        try:
-            await stream.send_pcm16(payload, source_rate=16_000)
-            await stream.commit()
-            async with asyncio.timeout(15):
-                async for message in stream.messages():
-                    await on_message(message)
-                    if message.get("message_type") in SAHARA_TERMINAL_MESSAGES:
-                        break
-        finally:
-            await stream.close()
-    return True
+        return None
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16_000)
+        wav.writeframes(payload[: len(payload) - len(payload) % 2])
+    headers = {"Authorization": f"Bearer {settings.intron_api_key}"}
+    data = {
+        "audio_file_name": "waymark-live-window.wav",
+        "use_language_asr_input": settings.intron_language,
+        "use_category": "file_category_general",
+        "use_disable_llm_corrections": "TRUE",
+    }
+    files = {
+        "audio_file_blob": (
+            "waymark-live-window.wav",
+            audio.getvalue(),
+            "audio/wav",
+        )
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            settings.intron_file_url,
+            headers=headers,
+            data=data,
+            files=files,
+        )
+        response.raise_for_status()
+        result = response.json()
+    transcript = result.get("data", {}).get("audio_transcript", "").strip()
+    return transcript or None
