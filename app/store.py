@@ -46,11 +46,33 @@ def _postgres_sql(sql: str) -> str:
 
 
 class _PostgresConnection:
-    def __init__(self, connection: psycopg.Connection) -> None:
-        self.raw = connection
+    def __init__(self, database_url: str) -> None:
+        self.database_url = database_url
+        self.raw = self._connect()
+
+    def _connect(self) -> psycopg.Connection:
+        return psycopg.connect(
+            self.database_url,
+            row_factory=dict_row,
+            connect_timeout=10,
+        )
+
+    def _reconnect(self) -> None:
+        try:
+            self.raw.close()
+        except Exception:
+            pass
+        self.raw = self._connect()
 
     def execute(self, sql: str, params: tuple | list = ()):
-        return self.raw.execute(_postgres_sql(sql), params)
+        statement = _postgres_sql(sql)
+        try:
+            return self.raw.execute(statement, params)
+        except psycopg.OperationalError:
+            self._reconnect()
+            if statement.lstrip().upper().startswith("SELECT"):
+                return self.raw.execute(statement, params)
+            raise
 
     def commit(self) -> None:
         self.raw.commit()
@@ -1216,12 +1238,7 @@ class PostgresStore(SQLiteStore):
         self.guidance_threshold = guidance_threshold
         self.freshness_half_life_days = freshness_half_life_days
         self._lock = threading.RLock()
-        raw = psycopg.connect(
-            database_url,
-            row_factory=dict_row,
-            connect_timeout=10,
-        )
-        self._connection = _PostgresConnection(raw)
+        self._connection = _PostgresConnection(database_url)
         self._create_schema()
 
     def _create_schema(self) -> None:
