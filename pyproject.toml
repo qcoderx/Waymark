@@ -35,7 +35,7 @@ waymark-infobip-setup = "app.infobip_setup:main"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["*.sql", "static/*.html"]
+app = ["*.sql", "static/*.html", "static/*.pdf"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

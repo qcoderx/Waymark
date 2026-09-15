@@ -154,6 +154,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def landing_page() -> FileResponse:
         return FileResponse(Path(__file__).parent / "static" / "landing.html")
 
+    @app.get("/waymark-benchmark-report.pdf", include_in_schema=False)
+    async def benchmark_report() -> FileResponse:
+        return FileResponse(
+            Path(__file__).parent / "static" / "waymark-benchmark-report.pdf",
+            media_type="application/pdf",
+            filename="waymark-benchmark-report.pdf",
+            content_disposition_type="inline",
+        )
+
     @app.get("/workspace", include_in_schema=False)
     async def workspace_page() -> FileResponse:
         return FileResponse(Path(__file__).parent / "static" / "workspace.html")
