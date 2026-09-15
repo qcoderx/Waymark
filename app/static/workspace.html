@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="Create Waymark calls, run customer-care tasks, generate documents, and manage delivery conversations.">
+  <title>Waymark workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.30.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.30.0/mapbox-gl.js"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23f7c94b' d='M32 60S8 42 8 24a24 24 0 1148 0c0 18-24 36-24 36Z'/%3E%3Ccircle cx='32' cy='24' r='8' fill='%23171716'/%3E%3C/svg%3E">
+  <style>
+    :root { --ink:#171716; --red:#e9483f; --red-deep:#a72c26; --yellow:#f7c94b; --paper:#fff; --stone:#f3efe8; --muted:#6f6861; --line:rgba(23,23,22,.15); --green:#268b64; --display:"Bricolage Grotesque",sans-serif; --body:"Manrope",sans-serif; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:#faf9f6; font-family:var(--body); }
+    button,input,select,textarea { font:inherit; }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    :focus-visible { outline:3px solid var(--red); outline-offset:3px; }
+    .topbar { position:sticky; z-index:40; top:0; height:74px; background:rgba(255,255,255,.92); border-bottom:1px solid var(--line); backdrop-filter:blur(18px); }
+    .topbar-inner { width:min(1400px,calc(100% - 40px)); height:100%; margin:auto; display:flex; align-items:center; justify-content:space-between; }
+    .brand { display:flex; align-items:center; gap:11px; color:var(--ink); font-family:var(--display); font-size:20px; font-weight:800; letter-spacing:-.03em; text-decoration:none; }
+    .mark { position:relative; display:inline-grid; width:29px; height:29px; place-items:center; transform:rotate(-45deg); border:7px solid var(--yellow); border-radius:50% 50% 50% 12%; }
+    .mark::after { content:""; width:5px; height:5px; border-radius:50%; background:var(--ink); }
+    .workspace-label { padding-left:12px; color:#857e76; border-left:1px solid var(--line); font-size:11px; font-weight:700; }
+    .top-actions { display:flex; align-items:center; gap:18px; }
+    .health { display:flex; align-items:center; gap:8px; color:#69625b; font-size:11px; font-weight:700; }
+    .health-dot { width:8px; height:8px; border-radius:50%; background:#b7b0a9; }
+    .health.ready .health-dot { background:var(--green); box-shadow:0 0 0 5px rgba(38,139,100,.11); }
+    .back-link { color:var(--ink); font-size:12px; font-weight:800; text-underline-offset:4px; }
+
+    .app-shell { width:min(1400px,calc(100% - 40px)); margin:28px auto 70px; display:grid; grid-template-columns:260px minmax(0,1fr) 340px; gap:22px; align-items:start; }
+    .sidebar,.panel,.activity { border:1px solid var(--line); border-radius:9px; background:white; }
+    .sidebar { position:sticky; top:102px; padding:20px; }
+    .sidebar h1 { margin:0; font-family:var(--display); font-size:27px; line-height:1; letter-spacing:-.045em; }
+    .sidebar-intro { margin:11px 0 24px; color:var(--muted); font-size:12px; line-height:1.55; }
+    .mode-button { width:100%; min-height:74px; display:grid; grid-template-columns:38px 1fr; gap:10px; align-items:center; margin-top:8px; padding:11px; border:1px solid transparent; border-radius:6px; color:#736c65; background:transparent; text-align:left; cursor:pointer; }
+    .mode-button:hover { background:var(--stone); }
+    .mode-button.active { color:var(--ink); background:var(--stone); border-color:var(--line); }
+    .mode-button .mode-icon { display:grid; width:36px; height:36px; place-items:center; border-radius:50%; color:white; background:var(--ink); font-family:var(--display); font-size:13px; font-weight:800; }
+    .mode-button.active .mode-icon { background:var(--red); }
+    .mode-button strong,.mode-button span { display:block; }
+    .mode-button strong { font-size:12px; }
+    .mode-button span { margin-top:3px; color:#8a837c; font-size:9px; line-height:1.35; }
+    .privacy { margin-top:24px; padding-top:18px; border-top:1px solid var(--line); color:#857e77; font-size:9px; line-height:1.55; }
+
+    .panel { overflow:hidden; }
+    .panel-head { padding:29px 32px; border-bottom:1px solid var(--line); }
+    .panel-head-main { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; }
+    .panel-head-copy { min-width:0; }
+    .panel-head small { color:var(--red-deep); font-size:10px; font-weight:800; }
+    .panel-head h2 { margin:7px 0 0; font-family:var(--display); font-size:clamp(30px,3vw,44px); letter-spacing:-.05em; line-height:1; }
+    .panel-head p { max-width:670px; margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.6; }
+    .reset-action { display:none; flex:0 0 auto; min-height:39px; padding:0 14px; border:1px solid var(--line); border-radius:4px; color:var(--ink); background:white; font-size:10px; font-weight:900; cursor:pointer; }
+    .reset-action.show { display:block; }
+    .panel-body { padding:30px 32px 34px; }
+    .workspace-flow { padding:22px 32px; border-bottom:1px solid var(--line); background:#fffaf3; }
+    .workspace-flow-title { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .workspace-flow-title strong { font-family:var(--display); font-size:16px; letter-spacing:-.025em; }
+    .workspace-flow-title span { color:#766f68; font-size:9px; font-weight:700; }
+    .flow-path { display:grid; grid-template-columns:1fr 34px 1.2fr 34px 1fr; align-items:center; gap:8px; margin-top:14px; }
+    .flow-node { min-height:48px; padding:10px 12px; border:1px solid var(--line); border-radius:5px; background:white; }
+    .flow-node strong,.flow-node span { display:block; }
+    .flow-node strong { font-size:10px; }
+    .flow-node span { margin-top:3px; color:#746d66; font-size:8px; line-height:1.35; }
+    .flow-node.engine { color:white; background:var(--ink); border-color:var(--ink); }
+    .flow-node.engine span { color:#d4cec7; }
+    .flow-arrow { color:var(--red); text-align:center; font-size:18px; }
+    .flow { display:none; }
+    .flow.active { display:block; animation:flowIn .3s ease both; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+    .field { min-width:0; }
+    .field.full { grid-column:1/-1; }
+    label { display:block; margin-bottom:8px; color:#5f5953; font-size:10px; font-weight:800; }
+    input,select,textarea { width:100%; min-height:46px; padding:11px 13px; border:1px solid var(--line); border-radius:5px; color:var(--ink); background:white; outline:0; transition:border-color .2s,box-shadow .2s; }
+    textarea { min-height:100px; resize:vertical; line-height:1.55; }
+    input:focus,select:focus,textarea:focus { border-color:var(--red); box-shadow:0 0 0 3px rgba(233,72,63,.1); }
+    .hint { display:block; margin-top:6px; color:#969089; font-size:8px; line-height:1.45; }
+    .form-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:24px; }
+    .primary,.secondary,.quiet,.danger { min-height:45px; padding:0 18px; border:1px solid transparent; border-radius:4px; font-size:11px; font-weight:900; cursor:pointer; transition:transform .15s,box-shadow .15s,background .15s; }
+    .primary { color:var(--ink); background:var(--yellow); box-shadow:0 8px 24px rgba(247,201,75,.17); }
+    .secondary { color:white; background:var(--red); }
+    .quiet { color:var(--ink); background:white; border-color:var(--line); }
+    .danger { color:var(--red-deep); background:#fff2f0; border-color:rgba(233,72,63,.2); }
+    button:hover:not(:disabled) { transform:translateY(-1px); }
+    button:disabled { opacity:.55; cursor:wait; }
+
+    .session { display:none; margin-top:30px; border-top:1px solid var(--line); padding-top:28px; }
+    .session.show { display:block; animation:flowIn .35s ease both; }
+    .session-banner { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:16px; background:var(--stone); border-radius:6px; }
+    .session-title { display:flex; align-items:center; gap:11px; min-width:0; }
+    .session-check { display:grid; width:32px; height:32px; flex:0 0 auto; place-items:center; border-radius:50%; color:white; background:var(--green); font-weight:900; }
+    .session-title small,.session-title strong { display:block; }
+    .session-title small { color:#8b847c; font-size:8px; }
+    .session-title strong { overflow:hidden; margin-top:2px; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+    .session-tools { display:flex; gap:8px; }
+    .tool-tabs { display:flex; gap:22px; margin:27px 0 22px; border-bottom:1px solid var(--line); }
+    .tool-tab { position:relative; padding:0 0 12px; border:0; color:#817a73; background:transparent; font-size:10px; font-weight:800; cursor:pointer; }
+    .tool-tab.active { color:var(--ink); }
+    .tool-tab.active::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--red); }
+    .tool-view { display:none; }
+    .tool-view.active { display:block; }
+    .composer { position:relative; }
+    .composer textarea { min-height:125px; padding-bottom:55px; }
+    .composer .secondary { position:absolute; right:9px; bottom:9px; min-height:38px; }
+    .speaker-row { display:flex; align-items:center; gap:9px; margin-bottom:10px; }
+    .speaker-row label { margin:0; }
+    .speaker-row select { width:auto; min-height:32px; padding:5px 30px 5px 9px; font-size:9px; }
+    .invoice-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px; }
+    .invoice-grid .wide { grid-column:1/-1; }
+    .currency-note { display:block; margin-top:6px; color:#746d66; font-size:8px; line-height:1.45; }
+    .map-field { grid-column:1/-1; }
+    .address-entry { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+    .address-entry button { min-height:46px; padding:0 16px; border:1px solid var(--ink); border-radius:5px; color:white; background:var(--ink); font-size:10px; font-weight:900; cursor:pointer; }
+    .address-status.found { color:var(--green); font-weight:800; }
+    .map-shell { position:relative; height:280px; overflow:hidden; border:1px solid var(--line); border-radius:7px; background:var(--stone); }
+    #deliveryMap { position:absolute; inset:0; }
+    .map-overlay { position:absolute; z-index:2; left:12px; bottom:12px; max-width:calc(100% - 24px); padding:9px 11px; border-radius:4px; color:var(--ink); background:rgba(255,255,255,.93); box-shadow:0 8px 24px rgba(23,23,22,.14); font-size:8px; font-weight:800; backdrop-filter:blur(8px); pointer-events:none; }
+    .map-empty { display:grid; height:100%; place-items:center; padding:24px; color:#6f6861; font-size:10px; font-weight:700; text-align:center; }
+    .mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib { opacity:.72; }
+
+    .links { display:none; margin-top:18px; padding:18px; border:1px solid rgba(233,72,63,.2); border-radius:6px; background:#fff8f7; }
+    .links.show { display:block; animation:flowIn .3s ease both; }
+    .links-head { display:flex; justify-content:space-between; gap:20px; align-items:start; }
+    .links h3 { margin:0; font-family:var(--display); font-size:20px; letter-spacing:-.03em; }
+    .links p { margin:5px 0 0; color:var(--muted); font-size:9px; }
+    .link-list { display:grid; gap:9px; margin-top:15px; }
+    .call-link { display:grid; grid-template-columns:90px minmax(0,1fr) auto auto; gap:8px; align-items:center; padding:9px; border:1px solid var(--line); border-radius:4px; background:white; }
+    .call-role { font-size:9px; font-weight:900; text-transform:capitalize; }
+    .call-url { overflow:hidden; color:#7d756e; font-size:8px; text-overflow:ellipsis; white-space:nowrap; }
+    .mini-button { min-height:30px; padding:0 9px; border:1px solid var(--line); border-radius:3px; color:var(--ink); background:white; font-size:8px; font-weight:900; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; }
+    .mini-button.open { color:white; background:var(--red); border-color:var(--red); }
+
+    .delivery-status { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:20px; }
+    .stat { padding:13px; border:1px solid var(--line); border-radius:5px; }
+    .stat small,.stat strong { display:block; }
+    .stat small { color:#89827b; font-size:8px; }
+    .stat strong { margin-top:5px; font-size:10px; }
+
+    .activity { position:sticky; top:102px; overflow:hidden; }
+    .activity-head { padding:21px; border-bottom:1px solid var(--line); }
+    .activity-head-row { display:flex; justify-content:space-between; align-items:center; }
+    .activity h2 { margin:0; font-family:var(--display); font-size:21px; letter-spacing:-.035em; }
+    .activity-sub { margin:6px 0 0; color:#8a837c; font-size:9px; }
+    .live-badge { display:flex; align-items:center; gap:6px; color:var(--red-deep); font-size:8px; font-weight:900; }
+    .live-badge::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--red); box-shadow:0 0 0 5px rgba(233,72,63,.1); animation:pulse 1.8s infinite; }
+    .feed { max-height:650px; min-height:380px; overflow:auto; padding:8px 21px 20px; }
+    .empty { padding:60px 10px; color:#918a82; text-align:center; font-size:10px; line-height:1.7; }
+    .feed-item { position:relative; padding:16px 0 16px 20px; border-bottom:1px solid var(--line); }
+    .feed-item::before { content:""; position:absolute; top:21px; left:0; width:7px; height:7px; border-radius:50%; background:var(--red); }
+    .feed-meta { display:flex; justify-content:space-between; gap:10px; color:#918a83; font-size:8px; }
+    .feed-item strong { display:block; margin-top:6px; font-size:10px; }
+    .feed-item p { margin:5px 0 0; color:#68615a; font-size:9px; line-height:1.6; overflow-wrap:anywhere; }
+    .feed-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+    .artifact { display:inline-flex; padding:7px 9px; border-radius:3px; color:var(--ink); background:var(--yellow); font-size:8px; font-weight:900; text-decoration:none; }
+    .confirm { padding:7px 9px; border:0; border-radius:3px; color:white; background:var(--red); font-size:8px; font-weight:900; cursor:pointer; }
+    .toast { position:fixed; z-index:100; right:24px; bottom:24px; max-width:360px; padding:14px 17px; border-radius:5px; color:white; background:var(--ink); box-shadow:0 18px 50px rgba(0,0,0,.22); font-size:10px; line-height:1.5; transform:translateY(25px); opacity:0; pointer-events:none; transition:.25s ease; }
+    .toast.show { transform:none; opacity:1; }
+    .toast.error { background:var(--red-deep); }
+    @keyframes flowIn { from { opacity:0; transform:translateY(8px); } }
+    @keyframes pulse { 50% { box-shadow:0 0 0 10px rgba(233,72,63,0); } }
+
+    @media (max-width:1120px) {
+      .app-shell { grid-template-columns:220px minmax(0,1fr); }
+      .activity { position:relative; top:auto; grid-column:2; }
+      .feed { max-height:none; min-height:180px; }
+    }
+    @media (max-width:760px) {
+      .topbar-inner,.app-shell { width:min(calc(100% - 24px),1400px); }
+      .workspace-label,.health { display:none; }
+      .app-shell { margin-top:12px; grid-template-columns:1fr; }
+      .sidebar { position:static; padding:14px; }
+      .sidebar h1,.sidebar-intro,.privacy { display:none; }
+      .mode-list { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .mode-button { margin:0; min-height:61px; }
+      .panel-head,.panel-body { padding:22px 18px; }
+      .panel-head-main { gap:14px; }
+      .workspace-flow { padding:18px; }
+      .workspace-flow-title { align-items:flex-start; flex-direction:column; gap:4px; }
+      .flow-path { grid-template-columns:1fr 1fr; grid-template-areas:"care delivery" "engine engine"; }
+      .flow-node:first-child { grid-area:care; }
+      .flow-node.engine { grid-area:engine; }
+      .flow-node:last-child { grid-area:delivery; }
+      .flow-arrow { display:none; }
+      .form-grid,.invoice-grid { grid-template-columns:1fr; }
+      .field.full,.invoice-grid .wide,.map-field { grid-column:auto; }
+      .address-entry { grid-template-columns:1fr; }
+      .session-banner { align-items:flex-start; flex-direction:column; }
+      .session-tools { width:100%; }
+      .session-tools button { flex:1; }
+      .call-link { grid-template-columns:68px minmax(0,1fr) auto; }
+      .call-link .open { grid-column:3; }
+      .call-url { grid-row:2; grid-column:1/3; }
+      .activity { grid-column:1; }
+      .delivery-status { grid-template-columns:1fr; }
+      .map-shell { height:240px; }
+    }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div style="display:flex;align-items:center;gap:12px"><a class="brand" href="/"><span class="mark" aria-hidden="true"></span>Waymark</a><span class="workspace-label">Live workspace</span></div>
+      <div class="top-actions"><span class="health" id="health"><span class="health-dot"></span><span id="healthText">Checking system</span></span><a class="back-link" href="/">Back to site</a></div>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="sidebar">
+      <h1>Start with a conversation.</h1>
+      <p class="sidebar-intro">Choose what the people on the call need to accomplish.</p>
+      <div class="mode-list">
+        <button class="mode-button active" type="button" data-mode="care"><span class="mode-icon">C</span><span><strong>Customer care</strong><span>Banks, telecoms, fintech and business</span></span></button>
+        <button class="mode-button" type="button" data-mode="delivery"><span class="mode-icon">D</span><span><strong>Delivery</strong><span>Rider and customer direction calls</span></span></button>
+      </div>
+      <p class="privacy">This is a sandbox workspace. Customer records and balances shown here are fictional. Call participants hear a disclosure before Waymark processes audio.</p>
+    </aside>
+
+    <section class="panel">
+      <div class="workspace-flow" aria-label="How Waymark session types work">
+        <div class="workspace-flow-title"><strong>Two starting points. One Waymark engine.</strong><span>Choose the workflow that matches the conversation.</span></div>
+        <div class="flow-path">
+          <div class="flow-node"><strong>Customer care</strong><span>Accounts, service and business tasks</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-node engine"><strong>Waymark listens and acts</strong><span>Shared context, tools and an audit trail</span></div>
+          <div class="flow-arrow" aria-hidden="true">←</div>
+          <div class="flow-node"><strong>Delivery</strong><span>Rider, customer and live location guidance</span></div>
+        </div>
+      </div>
+      <div class="flow active" id="careFlow">
+        <div class="panel-head"><div class="panel-head-main"><div class="panel-head-copy"><small>Customer care and business</small><h2>Create customer-care session</h2><p>Attach a sandbox customer, start a shared call, and let Waymark answer or act using the conversation.</p></div><button class="reset-action" id="newCare" type="button">+ New session</button></div></div>
+        <div class="panel-body">
+          <form id="careForm">
+            <div class="form-grid">
+              <div class="field"><label for="vertical">Industry</label><select id="vertical"><option value="banking">Banking</option><option value="telecom">Telecom</option><option value="fintech">Fintech</option><option value="business">Business</option><option value="general">General</option></select></div>
+              <div class="field"><label for="customer">Sandbox customer</label><select id="customer"><option value="">Loading customers…</option></select></div>
+              <div class="field"><label for="organization">Organization</label><input id="organization" value="Waymark Demo Bank" maxlength="120" required></div>
+              <div class="field"><label for="subject">Reason for call</label><input id="subject" value="Account help" maxlength="240" required></div>
+            </div>
+            <div class="form-actions"><button class="primary" type="submit" id="createCare">Create session</button><span class="hint">You can create the call links immediately afterward.</span></div>
+          </form>
+
+          <div class="session" id="careSession">
+            <div class="session-banner">
+              <div class="session-title"><span class="session-check">✓</span><span><small>ACTIVE SESSION</small><strong id="careSessionId"></strong></span></div>
+              <div class="session-tools"><button class="secondary" id="createCareLinks" type="button">Create call links</button></div>
+            </div>
+            <div class="links" id="careLinks"></div>
+            <div class="tool-tabs"><button class="tool-tab active" type="button" data-care-tool="agent">Ask the agent</button><button class="tool-tab" type="button" data-care-tool="invoice">Create invoice</button></div>
+            <div class="tool-view active" id="agentTool">
+              <div class="speaker-row"><label for="careSpeaker">Speaking as</label><select id="careSpeaker"><option value="customer">Customer</option><option value="agent">Support agent</option></select></div>
+              <div class="composer"><textarea id="carePrompt" maxlength="8000">What is my available account balance?</textarea><button class="secondary" id="runCareAgent" type="button">Send to Waymark</button></div>
+            </div>
+            <div class="tool-view" id="invoiceTool">
+              <div class="invoice-grid">
+                <div><label for="seller">Seller</label><input id="seller" value="Bello Creative Studio"></div>
+                <div><label for="buyer">Buyer</label><input id="buyer" value="Northwind Traders"></div>
+                <div class="wide"><label for="itemDescription">Item or service</label><input id="itemDescription" value="Website design" minlength="3" maxlength="300" required><span class="hint">Use a clear description that both parties will recognize.</span></div>
+                <div><label for="quantity">Quantity</label><input id="quantity" type="number" min="0.01" step="0.01" value="1"></div>
+                <div><label for="unitPrice">Unit price</label><input id="unitPrice" type="number" min="0" step="0.01" value="350000"></div>
+                <div><label for="currency">Currency</label><select id="currency"><option value="NGN" selected>NGN — Nigerian naira (₦)</option><option value="USD">USD — US dollar ($)</option><option value="GBP">GBP — British pound (£)</option><option value="EUR">EUR — Euro (€)</option></select><span class="currency-note">The code and full currency name appear on the PDF.</span></div>
+                <div><label for="dueDate">Due date</label><input id="dueDate" type="date"></div>
+                <div class="wide"><label for="invoiceNotes">Notes</label><input id="invoiceNotes" value="Thank you for your business."></div>
+              </div>
+              <div class="form-actions"><button class="primary" id="createInvoice" type="button">Generate downloadable PDF</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow" id="deliveryFlow">
+        <div class="panel-head"><div class="panel-head-main"><div class="panel-head-copy"><small>Last-mile delivery</small><h2>Create delivery call</h2><p>Set the destination area, generate rider and customer links, and watch Waymark turn spoken landmarks into guidance.</p></div><button class="reset-action" id="newDelivery" type="button">+ New delivery</button></div></div>
+        <div class="panel-body">
+          <form id="deliveryForm">
+            <div class="form-grid">
+              <div class="field"><label for="orderId">Order ID</label><input id="orderId" required></div>
+              <div class="field"><label for="destinationKey">Destination reference</label><input id="destinationKey" placeholder="Optional stable customer/address ID"></div>
+              <div class="field"><label for="riderRef">Rider reference</label><input id="riderRef" value="rider-demo" required></div>
+              <div class="field"><label for="riderPhone">Rider phone</label><input id="riderPhone" type="tel" value="+2348011111111" required><span class="hint">Nigeria (+234) by default. Use E.164 format.</span></div>
+              <div class="field"><label for="customerRef">Customer reference</label><input id="customerRef" value="customer-demo" required></div>
+              <div class="field"><label for="customerPhone">Customer phone</label><input id="customerPhone" type="tel" value="+2348022222222" required><span class="hint">Nigeria (+234) by default. Browser call links do not dial these numbers.</span></div>
+              <div class="field"><label for="latitude">Approximate latitude</label><input id="latitude" type="number" step="any" value="6.5244" required></div>
+              <div class="field"><label for="longitude">Approximate longitude</label><input id="longitude" type="number" step="any" value="3.3792" required></div>
+              <div class="field full"><label for="coarseAddress">Destination address</label><div class="address-entry"><input id="coarseAddress" value="Lagos, Nigeria" maxlength="256" autocomplete="street-address" placeholder="Type a street, area, or full address"><button id="findAddress" type="button">Find on map</button></div><span class="hint address-status" id="addressStatus" aria-live="polite">Type at least 3 characters. Waymark will place the pin automatically.</span></div>
+              <div class="field map-field"><label>Destination preview</label><div class="map-shell"><div id="deliveryMap" role="application" aria-label="Interactive destination map"></div><div class="map-overlay" id="mapCoordinates">6.52440, 3.37920 · Drag the pin to refine</div></div><span class="hint">The pin follows the coordinates above. Drag it to update latitude and longitude.</span></div>
+            </div>
+            <div class="form-actions"><button class="primary" type="submit" id="createDelivery">Create delivery</button></div>
+          </form>
+
+          <div class="session" id="deliverySession">
+            <div class="session-banner">
+              <div class="session-title"><span class="session-check">✓</span><span><small>ACTIVE DELIVERY</small><strong id="deliveryId"></strong></span></div>
+              <div class="session-tools"><button class="secondary" id="createDeliveryLinks" type="button">Create call links</button></div>
+            </div>
+            <div class="links" id="deliveryLinks"></div>
+            <div class="delivery-status">
+              <div class="stat"><small>Status</small><strong id="deliveryState">Open</strong></div>
+              <div class="stat"><small>Known route</small><strong id="knownRoute">Checking</strong></div>
+              <div class="stat"><small>Call type</small><strong>Daily browser audio</strong></div>
+            </div>
+            <div class="tool-tabs"><button class="tool-tab active" type="button">Complete delivery</button></div>
+            <div class="form-grid">
+              <div class="field"><label for="finalLatitude">Final latitude</label><input id="finalLatitude" type="number" step="any" value="6.5244"></div>
+              <div class="field"><label for="finalLongitude">Final longitude</label><input id="finalLongitude" type="number" step="any" value="3.3792"></div>
+              <div class="field"><label for="duration">Duration in seconds</label><input id="duration" type="number" min="0" value="300"></div>
+              <div class="field"><label for="delivered">Outcome</label><select id="delivered"><option value="true">Delivered successfully</option><option value="false">Could not deliver</option></select></div>
+            </div>
+            <div class="form-actions"><button class="primary" id="completeDelivery" type="button">Save delivery outcome</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="activity">
+      <div class="activity-head"><div class="activity-head-row"><h2>Live activity</h2><span class="live-badge">LIVE</span></div><p class="activity-sub">Messages, actions, documents, and call events appear here.</p></div>
+      <div class="feed" id="feed"><div class="empty">Create a session to start the activity timeline.</div></div>
+    </aside>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+  (() => {
+    const state = { mode:'care', customers:[], careSession:null, delivery:null, careTimer:null, deliveryTimer:null, map:null, mapMarker:null, mapLoadStarted:false, addressLabel:'', geocodeTimer:null, geocodeSequence:0 };
+    const $ = id => document.getElementById(id);
+    const feed = $('feed');
+    const toast = $('toast');
+    const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
+    const titleCase = value => String(value || '').replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
+    const time = value => value ? new Date(value).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'Now';
+    const showToast = (message, error=false) => { toast.textContent=message; toast.classList.toggle('error',error); toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer=setTimeout(()=>toast.classList.remove('show'),3200); };
+    async function request(path, options={}) {
+      const response = await fetch(path, options);
+      let body = null;
+      try { body = await response.json(); } catch (_) {}
+      if (!response.ok) throw new Error(body?.detail || `Request failed (${response.status})`);
+      return body;
+    }
+    function readDestinationCoordinates() {
+      const lat=Number($('latitude').value), lng=Number($('longitude').value);
+      return Number.isFinite(lat)&&Number.isFinite(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180 ? {lat,lng} : null;
+    }
+    function updateMapLabel(location) {
+      $('mapCoordinates').textContent=location ? `${state.addressLabel?state.addressLabel+' · ':''}${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} · Drag to refine` : 'Enter valid latitude and longitude';
+    }
+    function updateDestinationMap(animate=false) {
+      const location=readDestinationCoordinates(); updateMapLabel(location);
+      if(!location||!state.map||!state.mapMarker)return;
+      state.mapMarker.setLngLat([location.lng,location.lat]);
+      if(animate)state.map.easeTo({center:[location.lng,location.lat],duration:450});
+    }
+    async function ensureDeliveryMap() {
+      if(state.map){state.map.resize();updateDestinationMap();return;}
+      if(state.mapLoadStarted)return;
+      state.mapLoadStarted=true;
+      try {
+        const config=await request('/v1/ui/config');
+        if(!config.mapbox_public_token||!window.mapboxgl)throw new Error('Map preview is not configured.');
+        mapboxgl.accessToken=config.mapbox_public_token;
+        const location=readDestinationCoordinates()||{lat:6.5244,lng:3.3792};
+        state.map=new mapboxgl.Map({container:'deliveryMap',style:'mapbox://styles/mapbox/streets-v12',center:[location.lng,location.lat],zoom:13});
+        state.map.addControl(new mapboxgl.NavigationControl({showCompass:false}),'top-right');
+        state.mapMarker=new mapboxgl.Marker({color:'#e9483f',draggable:true}).setLngLat([location.lng,location.lat]).addTo(state.map);
+        state.mapMarker.on('dragend',()=>{const point=state.mapMarker.getLngLat();state.addressLabel='Custom pin';$('latitude').value=point.lat.toFixed(5);$('longitude').value=point.lng.toFixed(5);updateMapLabel({lat:point.lat,lng:point.lng});$('addressStatus').textContent='Pin moved manually. These coordinates will be saved.';$('addressStatus').classList.add('found');});
+        state.map.on('load',()=>state.map.resize());
+      } catch(error) {
+        $('deliveryMap').innerHTML=`<div class="map-empty">${escapeHtml(error.message)} Coordinates still work without the preview.</div>`;
+        $('mapCoordinates').style.display='none';
+      }
+    }
+    async function geocodeAddress() {
+      const query=$('coarseAddress').value.trim();
+      if(query.length<3){$('addressStatus').textContent='Type at least 3 characters to find an address.';$('addressStatus').classList.remove('found');return;}
+      const sequence=++state.geocodeSequence,button=$('findAddress'),location=readDestinationCoordinates();
+      button.disabled=true;button.textContent='Finding…';$('addressStatus').textContent='Looking for the closest match…';$('addressStatus').classList.remove('found');
+      try {
+        const search=new URLSearchParams({query});
+        if(location){search.set('lat',location.lat);search.set('lng',location.lng);}
+        const matches=await request(`/v1/maps/geocode?${search}`);
+        if(sequence!==state.geocodeSequence)return;
+        if(!matches.length)throw new Error('No matching address found. Add a street, area, or city and try again.');
+        const match=matches[0],point=match.location,label=match.formatted_address||match.name;
+        state.addressLabel=match.name;$('coarseAddress').value=label;$('latitude').value=point.lat.toFixed(6);$('longitude').value=point.lng.toFixed(6);
+        await ensureDeliveryMap();updateDestinationMap();
+        if(state.map)state.map.easeTo({center:[point.lng,point.lat],zoom:16,duration:700});
+        $('addressStatus').textContent=`Pinned ${label}`;$('addressStatus').classList.add('found');showToast('Address pinned on the map.');
+      } catch(error) {
+        if(sequence===state.geocodeSequence){$('addressStatus').textContent=error.message;$('addressStatus').classList.remove('found');}
+      } finally {
+        if(sequence===state.geocodeSequence){button.disabled=false;button.textContent='Find on map';}
+      }
+    }
+    async function busy(button, work, working='Working…') {
+      const label=button.textContent; button.disabled=true; button.textContent=working;
+      try { return await work(); } catch(error) { showToast(error.message,true); throw error; }
+      finally { button.disabled=false; button.textContent=label; }
+    }
+    function setMode(mode) {
+      state.mode=mode;
+      document.querySelectorAll('.mode-button').forEach(button=>button.classList.toggle('active',button.dataset.mode===mode));
+      $('careFlow').classList.toggle('active',mode==='care');
+      $('deliveryFlow').classList.toggle('active',mode==='delivery');
+      if(mode==='delivery')setTimeout(ensureDeliveryMap,0);
+      if(mode==='care' && state.careSession) refreshCareTimeline();
+      else if(mode==='delivery' && state.delivery) refreshDeliveryTimeline();
+      else feed.innerHTML='<div class="empty">Create a session to start the activity timeline.</div>';
+    }
+    document.querySelectorAll('.mode-button').forEach(button=>button.addEventListener('click',()=>setMode(button.dataset.mode)));
+
+    async function checkHealth() {
+      try { const health=await request('/health'); $('health').classList.toggle('ready',health.status==='ok'); $('healthText').textContent=health.production_ready?'All systems ready':'Sandbox available'; }
+      catch (_) { $('healthText').textContent='System unavailable'; }
+    }
+
+    async function loadCustomers() {
+      state.customers=await request('/v1/care/customers');
+      renderCustomers();
+    }
+    function renderCustomers() {
+      const vertical=$('vertical').value;
+      const matches=state.customers.filter(customer=>customer.vertical===vertical);
+      $('customer').innerHTML='<option value="">No customer attached</option>'+matches.map(customer=>`<option value="${escapeHtml(customer.id)}">${escapeHtml(customer.name)} — ${escapeHtml(customer.organization)}</option>`).join('');
+      if(matches.length) { $('customer').value=matches[0].id; $('organization').value=matches[0].organization; }
+      const business=vertical==='business';
+      $('careSpeaker').innerHTML=business?'<option value="employee">Business</option><option value="counterparty">Counterparty</option>':'<option value="customer">Customer</option><option value="agent">Support agent</option>';
+    }
+    $('vertical').addEventListener('change',renderCustomers);
+    $('customer').addEventListener('change',()=>{ const customer=state.customers.find(item=>item.id===$('customer').value); if(customer)$('organization').value=customer.organization; });
+
+    $('careForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        const session=await busy($('createCare'),()=>request('/v1/care/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vertical:$('vertical').value,organization:$('organization').value.trim(),customer_id:$('customer').value||null,subject:$('subject').value.trim()})}),'Creating…');
+        state.careSession=session; $('careSessionId').textContent=session.id; $('careSession').classList.add('show'); $('careLinks').classList.remove('show'); $('newCare').classList.add('show');
+        clearInterval(state.careTimer); state.careTimer=setInterval(refreshCareTimeline,3500); await refreshCareTimeline(); showToast('Customer-care session created.');
+      } catch (_) {}
+    });
+    $('newCare').addEventListener('click',()=>{ state.careSession=null; $('careSession').classList.remove('show'); $('newCare').classList.remove('show'); clearInterval(state.careTimer); feed.innerHTML='<div class="empty">Create a session to start the activity timeline.</div>'; $('vertical').focus(); });
+
+    function renderCallLinks(container, links, expiresAt) {
+      container.innerHTML=`<div class="links-head"><div><h3>Participant links are ready</h3><p>Each private link expires ${escapeHtml(new Date(expiresAt).toLocaleString())}.</p></div></div><div class="link-list">${Object.entries(links).map(([role,url])=>`<div class="call-link"><span class="call-role">${escapeHtml(role)}</span><span class="call-url">${escapeHtml(url)}</span><button class="mini-button copy-link" type="button" data-url="${escapeHtml(url)}">Copy</button><a class="mini-button open" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open call</a></div>`).join('')}</div>`;
+      container.classList.add('show');
+      container.querySelectorAll('.copy-link').forEach(button=>button.addEventListener('click',async()=>{ try{await navigator.clipboard.writeText(button.dataset.url);showToast(`${titleCase(button.closest('.call-link').querySelector('.call-role').textContent)} link copied.`);}catch(_){showToast('Copy was blocked. Select the visible link instead.',true);} }));
+    }
+    $('createCareLinks').addEventListener('click',async()=>{
+      if(!state.careSession)return;
+      try { const result=await busy($('createCareLinks'),()=>request(`/v1/care/sessions/${state.careSession.id}/webrtc`,{method:'POST'}),'Creating room…'); renderCallLinks($('careLinks'),result.links,result.expires_at); showToast('Call room created. Open one link for each participant.'); }
+      catch (_) {}
+    });
+
+    document.querySelectorAll('[data-care-tool]').forEach(button=>button.addEventListener('click',()=>{
+      document.querySelectorAll('[data-care-tool]').forEach(item=>item.classList.toggle('active',item===button));
+      $('agentTool').classList.toggle('active',button.dataset.careTool==='agent'); $('invoiceTool').classList.toggle('active',button.dataset.careTool==='invoice');
+    }));
+    $('runCareAgent').addEventListener('click',async()=>{
+      const text=$('carePrompt').value.trim(); if(!state.careSession||!text)return;
+      try { await busy($('runCareAgent'),()=>request(`/v1/care/sessions/${state.careSession.id}/turns`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speaker:$('careSpeaker').value,text})}),'Waymark is acting…'); await refreshCareTimeline(); showToast('Waymark completed the turn.'); }
+      catch (_) {}
+    });
+    $('createInvoice').addEventListener('click',async()=>{
+      if(!state.careSession)return;
+      const item=$('itemDescription'),description=item.value.trim(),meaningful=new Set([...description.toLowerCase()].filter(character=>/[a-z0-9]/.test(character)));
+      item.setCustomValidity(description.length>=3&&meaningful.size>=3?'':'Describe the actual product or service being invoiced.');
+      if(!item.reportValidity())return;
+      const payload={seller:$('seller').value.trim(),buyer:$('buyer').value.trim(),currency:$('currency').value,items:[{description,quantity:Number($('quantity').value),unit_price:Number($('unitPrice').value)}],due_date:$('dueDate').value||null,notes:$('invoiceNotes').value.trim()||null};
+      try { await busy($('createInvoice'),()=>request(`/v1/care/sessions/${state.careSession.id}/invoices`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),'Generating PDF…'); await refreshCareTimeline(); showToast('Invoice created and ready to download.'); }
+      catch (_) {}
+    });
+    async function confirmAction(actionId,token,button) {
+      try { await busy(button,()=>request(`/v1/care/actions/${actionId}/confirm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation_token:token})}),'Confirming…'); await refreshCareTimeline(); showToast('Sensitive action confirmed and completed.'); }
+      catch (_) {}
+    }
+    function renderCareFeed(timeline) {
+      const items=[];
+      for(const message of timeline.messages)items.push({at:message.created_at,type:message.speaker==='waymark'?'Waymark response':titleCase(message.speaker),title:message.speaker==='waymark'?'Agent replied':'Participant spoke',body:message.text});
+      for(const action of timeline.actions)items.push({at:action.created_at,type:'Action',title:titleCase(action.action_type),body:`${titleCase(action.status)} · ${titleCase(action.risk_level)} risk`,action});
+      for(const artifact of timeline.artifacts)items.push({at:artifact.created_at,type:'Document',title:artifact.file_name,body:'Ready for both participants',artifact});
+      items.sort((a,b)=>new Date(b.at)-new Date(a.at));
+      if(!items.length){feed.innerHTML='<div class="empty">The session is active. Speak on the call or send a task to Waymark.</div>';return;}
+      feed.innerHTML=items.map((item,index)=>`<article class="feed-item"><div class="feed-meta"><span>${escapeHtml(item.type)}</span><time>${escapeHtml(time(item.at))}</time></div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.body)}</p><div class="feed-actions">${item.artifact?`<a class="artifact" href="${escapeHtml(item.artifact.download_url)}" target="_blank" rel="noopener">Download document</a>`:''}${item.action?.status==='pending_confirmation'&&item.action.confirmation_token?`<button class="confirm" type="button" data-action="${escapeHtml(item.action.id)}" data-token="${escapeHtml(item.action.confirmation_token)}">Confirm action</button>`:''}</div></article>`).join('');
+      feed.querySelectorAll('.confirm').forEach(button=>button.addEventListener('click',()=>confirmAction(button.dataset.action,button.dataset.token,button)));
+    }
+    async function refreshCareTimeline(){ if(!state.careSession||state.mode!=='care')return; try{renderCareFeed(await request(`/v1/care/sessions/${state.careSession.id}`));}catch(_){} }
+
+    const randomOrder=()=>`WM-${new Date().toISOString().slice(0,10).replaceAll('-','')}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+    $('orderId').value=randomOrder();
+    ['latitude','longitude'].forEach(id=>$(id).addEventListener('input',()=>{state.addressLabel='';updateDestinationMap(true);}));
+    $('findAddress').addEventListener('click',()=>{clearTimeout(state.geocodeTimer);geocodeAddress();});
+    $('coarseAddress').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();clearTimeout(state.geocodeTimer);geocodeAddress();}});
+    $('coarseAddress').addEventListener('input',()=>{clearTimeout(state.geocodeTimer);state.geocodeSequence+=1;$('findAddress').disabled=false;$('findAddress').textContent='Find on map';$('addressStatus').textContent='Keep typing — the pin will update automatically.';$('addressStatus').classList.remove('found');state.geocodeTimer=setTimeout(geocodeAddress,750);});
+    $('deliveryForm').addEventListener('submit',async event=>{
+      event.preventDefault();
+      const payload={external_order_id:$('orderId').value.trim(),rider_ref:$('riderRef').value.trim(),rider_phone:$('riderPhone').value.trim(),customer_ref:$('customerRef').value.trim(),customer_phone:$('customerPhone').value.trim(),coarse_location:{lat:Number($('latitude').value),lng:Number($('longitude').value)},coarse_address:$('coarseAddress').value.trim()||null,destination_key:$('destinationKey').value.trim()||null};
+      try { const delivery=await busy($('createDelivery'),()=>request('/v1/deliveries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),'Creating…'); state.delivery=delivery; $('deliveryId').textContent=delivery.id; $('deliveryState').textContent=titleCase(delivery.status); $('knownRoute').textContent=delivery.known_route_available?'Available':'Learning on this call'; $('finalLatitude').value=delivery.coarse_location.lat; $('finalLongitude').value=delivery.coarse_location.lng; $('deliverySession').classList.add('show'); $('deliveryLinks').classList.remove('show'); $('newDelivery').classList.add('show'); clearInterval(state.deliveryTimer); state.deliveryTimer=setInterval(refreshDeliveryTimeline,3500); await refreshDeliveryTimeline(); showToast('Delivery created.'); }
+      catch (_) {}
+    });
+    $('newDelivery').addEventListener('click',()=>{state.delivery=null;$('deliverySession').classList.remove('show');$('newDelivery').classList.remove('show');$('orderId').value=randomOrder();clearInterval(state.deliveryTimer);feed.innerHTML='<div class="empty">Create a delivery to start the activity timeline.</div>';$('orderId').focus();});
+    $('createDeliveryLinks').addEventListener('click',async()=>{
+      if(!state.delivery)return;
+      try { const result=await busy($('createDeliveryLinks'),()=>request(`/v1/deliveries/${state.delivery.id}/webrtc`,{method:'POST'}),'Creating room…'); renderCallLinks($('deliveryLinks'),{rider:result.rider_url,customer:result.customer_url},result.expires_at); showToast('Rider and customer call links are ready.'); }
+      catch (_) {}
+    });
+    $('completeDelivery').addEventListener('click',async()=>{
+      if(!state.delivery)return;
+      const payload={delivered:$('delivered').value==='true',final_location:{lat:Number($('finalLatitude').value),lng:Number($('finalLongitude').value)},rider_confirmation:true,duration_seconds:Number($('duration').value)||null,retry_count:0};
+      try { const outcome=await busy($('completeDelivery'),()=>request(`/v1/deliveries/${state.delivery.id}/complete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),'Saving…'); $('deliveryState').textContent=outcome.delivered?'Delivered':'Not delivered'; await refreshDeliveryTimeline(); showToast(outcome.learned?'Delivery complete. Waymark learned this route.':'Delivery outcome saved.'); }
+      catch (_) {}
+    });
+    function renderDeliveryFeed(events){
+      if(!events.length){feed.innerHTML='<div class="empty">The delivery is ready. Open both call links and speak naturally.</div>';return;}
+      feed.innerHTML=[...events].reverse().map(event=>{const data=event.data||{};const body=data.transcript||data.message||data.status||data.guidance?.summary||JSON.stringify(data);return`<article class="feed-item"><div class="feed-meta"><span>${escapeHtml(titleCase(event.type))}</span><time>${escapeHtml(time(event.timestamp))}</time></div><strong>${escapeHtml(data.speaker?titleCase(data.speaker):'Delivery update')}</strong><p>${escapeHtml(body)}</p></article>`;}).join('');
+    }
+    async function refreshDeliveryTimeline(){if(!state.delivery||state.mode!=='delivery')return;try{renderDeliveryFeed(await request(`/v1/deliveries/${state.delivery.id}/events/history`));}catch(_){} }
+
+    checkHealth(); loadCustomers().catch(error=>showToast(error.message,true));
+  })();
+  </script>
+</body>
+</html>

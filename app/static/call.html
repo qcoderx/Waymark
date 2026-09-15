@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <title>Waymark call</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.30.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.30.0/mapbox-gl.js"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23f7c94b' d='M32 60S8 42 8 24a24 24 0 1148 0c0 18-24 36-24 36Z'/%3E%3Ccircle cx='32' cy='24' r='8' fill='%23171716'/%3E%3C/svg%3E">
+  <script crossorigin src="https://unpkg.com/@daily-co/daily-js@0.90.0"></script>
+  <style>
+    /* Shared Waymark visual system */
+    * { box-sizing:border-box; }
+    :root { --ink:#171716; --red:#e9483f; --red-deep:#a72c26; --yellow:#f7c94b; --paper:#fff; --stone:#f3efe8; --muted:#756f68; --line:rgba(23,23,22,.14); --green:#268b64; --display:"Bricolage Grotesque",sans-serif; --body:"Manrope",sans-serif; }
+    html { background:var(--paper); }
+    body { margin:0; min-height:100svh; color:var(--ink); background:var(--paper); font-family:var(--body); overflow-x:hidden; }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    :focus-visible { outline:3px solid var(--red); outline-offset:3px; }
+    .page { position:relative; min-height:100svh; overflow:hidden; }
+    .page::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:.48; background-image:linear-gradient(rgba(23,23,22,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(23,23,22,.05) 1px,transparent 1px); background-size:44px 44px; mask-image:linear-gradient(135deg,#000,transparent 56%); }
+    .orb { position:absolute; top:-340px; right:-260px; width:760px; height:760px; border:1px solid rgba(233,72,63,.18); border-radius:50%; pointer-events:none; }
+    .orb::before,.orb::after { content:""; position:absolute; border:1px solid rgba(233,72,63,.12); border-radius:50%; }
+    .orb::before { inset:90px; }
+    .orb::after { inset:190px; background:rgba(247,201,75,.06); }
+    .topbar { position:relative; z-index:4; height:82px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.8); backdrop-filter:blur(18px); }
+    .topbar-inner { width:min(1160px,calc(100% - 44px)); height:100%; margin:auto; display:flex; align-items:center; justify-content:space-between; }
+    .brand { display:flex; align-items:center; gap:11px; color:var(--ink); font-family:var(--display); font-size:20px; font-weight:800; letter-spacing:-.035em; text-decoration:none; text-transform:none; }
+    .brand-mark { position:relative; display:grid; width:29px; height:29px; place-items:center; transform:rotate(-45deg); border:7px solid var(--yellow); border-radius:50% 50% 50% 12%; }
+    .brand-mark::after { content:""; width:5px; height:5px; border-radius:50%; background:var(--ink); }
+    .secure { display:flex; align-items:center; gap:8px; color:#6f6861; font-size:11px; font-weight:700; letter-spacing:0; }
+    .secure::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 5px rgba(38,139,100,.1); }
+    main { position:relative; z-index:2; width:min(1160px,calc(100% - 44px)); min-height:0; margin:auto; padding:clamp(54px,8vh,96px) 0 46px; display:block; }
+    .call-layout { display:grid; grid-template-columns:minmax(0,.92fr) minmax(420px,.78fr); gap:clamp(54px,8vw,112px); align-items:center; }
+    .intro { max-width:590px; }
+    .eyebrow { display:flex; align-items:center; gap:11px; margin:0 0 23px; color:var(--red-deep); font-size:12px; font-weight:800; letter-spacing:.04em; text-transform:none; }
+    .eyebrow::before { content:""; width:34px; height:2px; background:var(--red); box-shadow:8px -5px 0 -.5px var(--red),16px 4px 0 -.5px var(--red); }
+    h1 { margin:0; max-width:580px; color:var(--ink); font-family:var(--display); font-size:clamp(58px,7.3vw,94px); line-height:.91; letter-spacing:-.065em; font-weight:700; text-transform:none; text-wrap:balance; }
+    h1 span { color:var(--red); }
+    .intro-copy { max-width:520px; margin:28px 0 0; color:#625d57; font-size:16px; line-height:1.72; }
+    .promise { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; margin-top:42px; border:1px solid var(--line); background:var(--line); }
+    .promise div { min-height:82px; padding:16px; background:rgba(255,255,255,.93); }
+    .promise strong { display:block; font-family:var(--display); font-size:17px; letter-spacing:-.025em; }
+    .promise span { display:block; margin-top:6px; color:#837b74; font-size:9px; line-height:1.4; }
+    .session-card { position:relative; padding:28px; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.95); box-shadow:0 32px 90px rgba(38,31,27,.13); }
+    .session-card::before { content:""; position:absolute; top:-1px; left:28px; width:76px; height:3px; background:var(--red); }
+    .card-top { display:flex; align-items:center; justify-content:space-between; gap:20px; padding-bottom:23px; border-bottom:1px solid var(--line); }
+    .card-label { margin:0; color:#8a827a; font-size:9px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+    .card-top strong { display:block; margin-top:5px; font-family:var(--display); font-size:20px; letter-spacing:-.03em; }
+    .audio-badge { padding:7px 9px; border-radius:99px; color:#726a63; background:var(--stone); font-size:9px; font-weight:800; white-space:nowrap; }
+    .status-row { margin:0; padding:23px 0; display:grid; grid-template-columns:42px 1fr; gap:14px; align-items:center; border-top:0; border-bottom:1px solid var(--line); }
+    .pulse-wrap { display:grid; width:42px; height:42px; place-items:center; border-radius:50%; background:var(--stone); }
+    .pulse { width:10px; height:10px; border-radius:50%; background:#aaa39b; box-shadow:0 0 0 5px rgba(117,111,104,.08); }
+    .pulse.live { background:var(--red); box-shadow:0 0 0 5px rgba(233,72,63,.11); animation:pulse 1.8s infinite; }
+    #status { margin:0; font-family:var(--display); font-size:18px; font-weight:700; letter-spacing:-.025em; }
+    #detail { margin:4px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+    .people { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:20px 0 0; }
+    .person { position:relative; padding:15px; min-height:106px; color:var(--ink); border:1px solid var(--line); border-radius:6px; background:#fcfbf9; }
+    .person::after { content:""; position:absolute; top:15px; right:15px; width:7px; height:7px; border-radius:50%; background:#c1bbb5; }
+    .person:first-child::after { background:var(--yellow); }
+    .person small { display:block; color:#8b847d; text-transform:uppercase; letter-spacing:.1em; font-size:8px; font-weight:800; }
+    .person strong { display:block; margin-top:11px; overflow:hidden; font-family:var(--display); font-size:18px; letter-spacing:-.025em; text-overflow:ellipsis; white-space:nowrap; }
+    .person .state { margin-top:7px; color:var(--red-deep); font-size:9px; font-weight:700; }
+    .assistant-panel { display:none; margin:14px 0 0; padding:16px; color:var(--ink); border:1px solid rgba(233,72,63,.18); border-radius:6px; background:#fff8f7; }
+    .assistant-panel small { color:var(--red-deep); font-size:8px; font-weight:900; letter-spacing:.13em; text-transform:uppercase; }
+    .assistant-panel p { margin:8px 0 0; color:#5d5751; font-size:11px; line-height:1.55; }
+    .assistant-panel a { display:inline-flex; margin:11px 7px 0 0; padding:8px 10px; border-radius:3px; color:var(--ink); background:var(--yellow); font-size:9px; font-weight:900; text-decoration:none; }
+    .guidance-panel { display:none; margin-top:14px; overflow:hidden; border:1px solid rgba(233,72,63,.25); border-radius:7px; background:#fff; }
+    .guidance-panel.processing { box-shadow:0 0 0 4px rgba(233,72,63,.12); }
+    .guidance-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:13px 14px; border-bottom:1px solid var(--line); }
+    .guidance-head small { display:block; color:var(--red-deep); font-size:8px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    .guidance-head strong { display:block; margin-top:4px; font-family:var(--display); font-size:14px; letter-spacing:-.025em; }
+    .guidance-live { display:flex; align-items:center; gap:6px; color:var(--red-deep); font-size:8px; font-weight:900; white-space:nowrap; }
+    .guidance-live::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--red); animation:pulse 1.8s infinite; }
+    #locateRider { min-height:30px; padding:0 10px; border:1px solid var(--ink); border-radius:3px; color:white; background:var(--ink); font-size:8px; font-weight:900; white-space:nowrap; }
+    .guidance-map-wrap { position:relative; height:238px; background:var(--stone); }
+    #guidanceMap { position:absolute; inset:0; }
+    .guidance-map-note { position:absolute; z-index:2; right:10px; bottom:10px; left:10px; padding:9px 11px; border-radius:4px; color:var(--ink); background:rgba(255,255,255,.94); box-shadow:0 7px 22px rgba(23,23,22,.14); font-size:9px; font-weight:750; line-height:1.4; pointer-events:none; backdrop-filter:blur(8px); }
+    .guidance-map-note div { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .guidance-map-note span { display:block; overflow:hidden; margin-top:2px; color:#746d66; font-size:8px; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+    .mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib { opacity:.7; }
+    .notice { margin:18px 0; padding:0; color:#88817a; font-size:9px; line-height:1.55; }
+    .controls { display:grid; grid-template-columns:98px 1fr; gap:10px; }
+    button { min-height:54px; border:0; border-radius:4px; font:inherit; font-size:11px; font-weight:900; cursor:pointer; transition:transform .16s ease,box-shadow .16s ease,background .16s ease; }
+    button:hover:not(:disabled) { transform:translateY(-2px); }
+    button:active:not(:disabled) { transform:translateY(1px); }
+    #mute { color:var(--ink); background:white; border:1px solid var(--line); font-size:11px; }
+    #primary { color:var(--ink); background:var(--yellow); box-shadow:0 12px 28px rgba(247,201,75,.18); text-transform:none; letter-spacing:0; }
+    #primary.hangup { color:white; background:var(--red); box-shadow:0 12px 28px rgba(233,72,63,.18); }
+    #sound { display:none; grid-column:1/-1; min-height:46px; color:white; background:var(--red); }
+    #sound.needs-action { display:block; }
+    button:disabled { cursor:wait; opacity:.52; }
+    #error { display:none; margin:13px 0 0; padding:12px 14px; color:var(--red-deep); background:#fff1ef; border-left:3px solid var(--red); font-size:10px; line-height:1.5; }
+    audio { position:fixed; width:1px; height:1px; opacity:.01; pointer-events:none; }
+    .page-foot { width:min(1160px,calc(100% - 44px)); margin:auto; padding:0 0 max(28px,env(safe-area-inset-bottom)); display:flex; justify-content:space-between; gap:20px; color:#979089; font-size:9px; }
+    @keyframes pulse { 50% { box-shadow:0 0 0 11px rgba(233,72,63,0); } }
+    @media (max-width:850px) {
+      .call-layout { grid-template-columns:1fr; gap:42px; }
+      .intro { max-width:680px; }
+      h1 { font-size:clamp(54px,13vw,80px); }
+      .intro-copy { max-width:620px; }
+    }
+    @media (max-width:540px) {
+      .topbar { height:70px; }
+      .topbar-inner,main,.page-foot { width:min(100% - 30px,1160px); }
+      .secure { font-size:0; }
+      .secure::after { content:"Private call"; font-size:9px; }
+      main { padding:30px 0 26px; }
+      .call-layout { gap:23px; }
+      .eyebrow { margin-bottom:17px; }
+      h1 { font-size:clamp(46px,14vw,62px); }
+      .intro-copy { margin-top:17px; font-size:13px; line-height:1.6; }
+      .promise { display:none; }
+      .session-card { padding:21px 18px 18px; border-radius:8px; box-shadow:0 20px 54px rgba(38,31,27,.12); }
+      .session-card::before { left:18px; }
+      .card-top { padding-bottom:18px; }
+      .status-row { padding:18px 0; }
+      .people { gap:8px; }
+      .person { min-height:100px; padding:13px; }
+      .person strong { font-size:16px; }
+      .guidance-map-wrap { height:220px; }
+      .controls { grid-template-columns:84px 1fr; }
+      .page-foot { display:none; }
+      body.in-call .intro { display:none; }
+      body.in-call main { padding-top:16px; }
+      body.in-call .call-layout { gap:0; }
+    }
+    @media (prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="orb" aria-hidden="true"></div>
+  <header class="topbar"><div class="topbar-inner"><a class="brand" href="/"><span class="brand-mark"></span>Waymark</a><div class="secure">Private · encrypted audio</div></div></header>
+  <main>
+    <section class="call-layout">
+      <div class="intro">
+        <p class="eyebrow" id="roleLabel">Shared action call</p>
+        <h1>A clear line to the <span>other side.</span></h1>
+        <p class="intro-copy">Talk naturally. Waymark listens with everyone, keeps the conversation moving, and turns agreed next steps into action.</p>
+        <div class="promise" aria-label="Call features">
+          <div><strong>Audio only</strong><span>No camera needed</span></div>
+          <div><strong>Live agent</strong><span>Present on both sides</span></div>
+          <div><strong>Action ready</strong><span>Documents and tasks</span></div>
+        </div>
+      </div>
+      <section class="session-card" aria-label="Call controls">
+        <div class="card-top"><div><p class="card-label">Your conversation</p><strong>Ready when you are</strong></div><span class="audio-badge">Audio only</span></div>
+        <div class="status-row"><span class="pulse-wrap"><span class="pulse" id="pulse"></span></span><div><p id="status">Ready to connect</p><p id="detail">Join the call and allow microphone access.</p></div></div>
+        <div class="people">
+          <div class="person"><small>You</small><strong id="you">Caller</strong><div class="state" id="micState">Mic ready</div></div>
+          <div class="person"><small>Other side</small><strong id="other">Waiting</strong><div class="state" id="peerState">Not connected</div></div>
+        </div>
+        <div class="guidance-panel" id="guidancePanel" aria-label="Live rider guidance map">
+          <div class="guidance-head"><div><small>Rider guidance</small><strong id="guidanceTitle">Destination pinned</strong></div><button id="locateRider" type="button">Use my location</button></div>
+          <div class="guidance-map-wrap"><div id="guidanceMap" role="application" aria-label="Map of the live delivery route"></div><div class="guidance-map-note"><div id="guidanceInstruction">The red path will update as Waymark understands the directions.</div><span id="guidanceTranscript">Listening for spoken landmarks…</span></div></div>
+        </div>
+        <div class="assistant-panel" id="assistantPanel"><small>Waymark action</small><p id="assistantReply">Listening for a request…</p><div id="artifactLinks"></div></div>
+        <p class="notice" id="notice">Waymark processes this call to support the conversation and complete agreed actions. No video is used.</p>
+        <div class="controls"><button id="sound" type="button">Enable sound</button><button id="mute" type="button" aria-label="Mute microphone" disabled>Mute</button><button id="primary" type="button">Join call</button></div>
+        <div id="error" role="alert"></div>
+      </section>
+    </section>
+  </main>
+  <footer class="page-foot"><span>One conversation. Shared context. Real action.</span><span>Waymark v0.3</span></footer>
+</div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const role = params.get('role');
+  const access = params.get('access');
+  const subjectId = location.pathname.split('/').filter(Boolean).pop();
+  const isCare = location.pathname.startsWith('/care-call/');
+  const apiBase = isCare ? `/v1/care/sessions/${subjectId}` : `/v1/deliveries/${subjectId}`;
+  const roleNames = {rider:'Rider',customer:'Customer',agent:'Support agent',employee:'Business',counterparty:'Counterparty'};
+  const ui = Object.fromEntries(['status','detail','pulse','roleLabel','you','other','micState','peerState','notice','sound','mute','primary','error','assistantPanel','assistantReply','artifactLinks','guidancePanel','guidanceTitle','guidanceInstruction','guidanceTranscript','locateRider'].map(id => [id, document.getElementById(id)]));
+  let call, audioSocket, audioContext, audioProcessor, flushTimer, pollTimer, muted = false, joined = false, captureTrackId;
+  let guidanceSocket, guidancePollTimer, guidanceMap, guidanceMapReady, guidanceToken, destination, destinationMarker, riderMarker, riderLocation, latestGuidance, locationWatchId, lastRouteAt=0, landmarkMarkers=[], routeRevision=0, guidanceActive=false;
+  const sdk = window.Daily || window.DailyIframe;
+
+  function fail(message) { ui.error.textContent = message; ui.error.style.display = 'block'; ui.primary.disabled = false; }
+  function setStatus(title, detail, live=false) { ui.status.textContent=title; ui.detail.textContent=detail; ui.pulse.classList.toggle('live',live); }
+  function remoteParticipants() {
+    return call ? Object.values(call.participants()).filter(participant => !participant.local) : [];
+  }
+  function refreshPeople() {
+    if (!call) return;
+    const peers = remoteParticipants();
+    ui.other.textContent = peers.length ? (peers[0].user_name || 'Participant') : 'Waiting';
+    if (!peers.length) ui.peerState.textContent = 'Not connected';
+    else if (document.querySelector('audio[data-remote="true"]')) ui.peerState.textContent = 'Connected · audio ready';
+    else ui.peerState.textContent = 'Connected · waiting for audio';
+  }
+  function pcm16Buffer(input, sourceRate) {
+    const ratio = sourceRate / 16000;
+    const count = Math.max(1, Math.floor(input.length / ratio));
+    const output = new ArrayBuffer(count * 2); const view = new DataView(output);
+    for (let i=0;i<count;i++) {
+      const start=Math.floor(i*ratio), end=Math.min(input.length,Math.max(start+1,Math.floor((i+1)*ratio)));
+      let sum=0; for(let j=start;j<end;j++) sum += input[j];
+      const sample=Math.max(-1,Math.min(1,sum/(end-start)));
+      view.setInt16(i*2, sample < 0 ? sample*0x8000 : sample*0x7fff, true);
+    }
+    return output;
+  }
+  async function captureLocalTrack(track, wsUrl) {
+    if (!track || captureTrackId === track.id) return;
+    captureTrackId = track.id;
+    audioSocket = new WebSocket(wsUrl);
+    audioSocket.binaryType = 'arraybuffer';
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    await audioContext.resume();
+    const source = audioContext.createMediaStreamSource(new MediaStream([track]));
+    audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+    const silent = audioContext.createGain(); silent.gain.value = 0;
+    source.connect(audioProcessor); audioProcessor.connect(silent); silent.connect(audioContext.destination);
+    audioProcessor.onaudioprocess = event => {
+      event.outputBuffer.getChannelData(0).fill(0);
+      if (audioSocket.readyState === WebSocket.OPEN && !muted) audioSocket.send(pcm16Buffer(event.inputBuffer.getChannelData(0), audioContext.sampleRate));
+    };
+  }
+  async function startRemotePlayback(audio) {
+    try {
+      await audio.play();
+      ui.sound.classList.remove('needs-action');
+      refreshPeople();
+    } catch (_) {
+      ui.sound.classList.add('needs-action');
+      ui.peerState.textContent = 'Connected · tap Enable sound';
+    }
+  }
+  function syncRemoteAudio(participant, eventTrack=null) {
+    if (!participant || participant.local) return;
+    const track=eventTrack || participant.tracks?.audio?.persistentTrack || participant.audioTrack;
+    if (!track || track.kind !== 'audio' || track.readyState === 'ended') return;
+    let audio=document.getElementById('remote-'+participant.session_id);
+    if (!audio) {
+      audio=document.createElement('audio'); audio.id='remote-'+participant.session_id;
+      audio.dataset.remote='true'; audio.autoplay=true; audio.playsInline=true;
+      audio.setAttribute('playsinline',''); document.body.appendChild(audio);
+    }
+    const current=audio.srcObject?.getAudioTracks?.()[0];
+    if (!current || current.id !== track.id) audio.srcObject=new MediaStream([track]);
+    audio.muted=false; audio.volume=1;
+    startRemotePlayback(audio);
+  }
+  function syncAllRemoteAudio() {
+    remoteParticipants().forEach(participant => syncRemoteAudio(participant));
+    refreshPeople();
+  }
+  function removeRemoteAudio(track) {
+    document.querySelectorAll('audio[data-remote="true"]').forEach(audio => {
+      if (!track || audio.srcObject?.getTracks?.().includes(track)) audio.remove();
+    });
+    refreshPeople();
+  }
+  async function pollCare() {
+    if (!isCare) return;
+    try {
+      const response=await fetch(apiBase); if(!response.ok) return; const timeline=await response.json();
+      const replies=timeline.messages.filter(message=>message.speaker==='waymark');
+      if(replies.length) ui.assistantReply.textContent=replies[replies.length-1].text;
+      ui.artifactLinks.replaceChildren();
+      for(const artifact of timeline.artifacts.slice(-3)) { const link=document.createElement('a'); link.href=artifact.download_url; link.textContent=`Download ${artifact.file_name}`; link.target='_blank'; link.rel='noopener'; ui.artifactLinks.appendChild(link); }
+    } catch(_) {}
+  }
+  function routePoints(guidance) {
+    const candidates=guidance?.candidates || {}, points=[];
+    const add = location => {
+      if(!location || !Number.isFinite(Number(location.lat)) || !Number.isFinite(Number(location.lng)))return;
+      const point=[Number(location.lng),Number(location.lat)];
+      if(!points.some(existing=>Math.abs(existing[0]-point[0])<=0.00001&&Math.abs(existing[1]-point[1])<=0.00001))points.push(point);
+    };
+    add(riderLocation);
+    for(const step of guidance?.trail || []) {
+      const key=String(step.landmark_name || '').toLowerCase();
+      const match=candidates[key] || Object.entries(candidates).find(([name])=>name.toLowerCase()===key)?.[1];
+      add(match?.[0]?.location);
+    }
+    for(const matches of Object.values(candidates))add(matches?.[0]?.location);
+    add(destination);
+    return points.slice(0,25);
+  }
+  function routeData(coordinates=[]) {
+    return coordinates.length>1 ? {type:'Feature',properties:{},geometry:{type:'LineString',coordinates}} : {type:'FeatureCollection',features:[]};
+  }
+  function ensureRouteLayers() {
+    if(!guidanceMap.getSource('waymark-route'))guidanceMap.addSource('waymark-route',{type:'geojson',data:routeData()});
+    if(!guidanceMap.getLayer('waymark-route-casing'))guidanceMap.addLayer({id:'waymark-route-casing',type:'line',source:'waymark-route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#ffffff','line-width':9,'line-opacity':.92}});
+    if(!guidanceMap.getLayer('waymark-route-line'))guidanceMap.addLayer({id:'waymark-route-line',type:'line',source:'waymark-route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#e9483f','line-width':5.5,'line-opacity':1}});
+  }
+  async function roadGeometry(points) {
+    if(points.length<2)return points;
+    const coordinates=points.map(point=>`${point[0]},${point[1]}`).join(';');
+    const url=`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?overview=full&geometries=geojson&access_token=${encodeURIComponent(guidanceToken)}`;
+    try { const response=await fetch(url); if(!response.ok)throw new Error(); const data=await response.json(); return data.routes?.[0]?.geometry?.coordinates || points; }
+    catch(_){ return points; }
+  }
+  async function renderGuidance(guidance) {
+    latestGuidance=guidance;
+    if(!guidanceMap || !guidanceMapReady)return;
+    const revision=++routeRevision,points=routePoints(guidance);
+    await guidanceMapReady;if(revision!==routeRevision)return;ensureRouteLayers();
+    landmarkMarkers.forEach(marker=>marker.remove());landmarkMarkers=[];
+    const landmarkStart=riderLocation?1:0;
+    points.slice(landmarkStart,-1).forEach(point=>landmarkMarkers.push(new mapboxgl.Marker({color:'#f7c94b',scale:.7}).setLngLat(point).addTo(guidanceMap)));
+    const geometry=await roadGeometry(points);if(revision!==routeRevision)return;
+    guidanceMap.getSource('waymark-route').setData(routeData(geometry));
+    guidanceMap.setPaintProperty('waymark-route-line','line-opacity',1);
+    if(points.length>1){const bounds=points.reduce((box,point)=>box.extend(point),new mapboxgl.LngLatBounds(points[0],points[0]));guidanceMap.fitBounds(bounds,{padding:54,maxZoom:16,duration:650});}
+    const steps=(guidance?.trail || []).map(step=>step.instruction).filter(Boolean);
+    ui.guidanceTitle.textContent=(guidance?.trail || []).length?'Live path updated':(points.length>1?'Route to destination':'Destination pinned');
+    ui.guidanceInstruction.textContent=steps.length?steps.join(' → '):'Waymark is waiting for a clear route instruction.';
+    ui.guidanceTranscript.textContent=`${Math.round((guidance?.confidence || 0)*100)}% guidance confidence`;
+  }
+  function handleGuidanceEvent(event) {
+    if(event.type==='transcript.partial' && event.data?.transcript){ui.guidanceTitle.textContent='Listening live';ui.guidanceTranscript.textContent=event.data.transcript;ui.guidancePanel.classList.add('processing');if(guidanceMap?.getLayer('waymark-route-line'))guidanceMap.setPaintProperty('waymark-route-line','line-opacity',.62);clearTimeout(handleGuidanceEvent.timer);handleGuidanceEvent.timer=setTimeout(()=>ui.guidancePanel.classList.remove('processing'),700);}
+    if(event.type==='transcript.final' && event.data?.transcript){ui.guidanceTitle.textContent='Grounding directions';ui.guidanceTranscript.textContent=event.data.transcript;}
+    if(['guidance.updated','guidance.uncertain','route.reused'].includes(event.type) && event.data?.guidance)renderGuidance(event.data.guidance);
+  }
+  async function pollGuidance() {
+    try { const response=await fetch(`${apiBase}/guidance`);if(response.ok)renderGuidance(await response.json()); } catch(_) {}
+  }
+  function openGuidanceStream() {
+    const scheme=location.protocol==='https:'?'wss:':'ws:';
+    guidanceSocket=new WebSocket(`${scheme}//${location.host}/v1/deliveries/${subjectId}/events`);
+    guidanceSocket.onmessage=message=>{try{handleGuidanceEvent(JSON.parse(message.data));}catch(_){}};
+    guidanceSocket.onclose=()=>{if(guidanceActive&&!guidancePollTimer){guidancePollTimer=setInterval(pollGuidance,3500);pollGuidance();}};
+  }
+  function locateRider() {
+    if(locationWatchId!==undefined)return;
+    if(!navigator.geolocation){ui.guidanceTranscript.textContent='Location is unavailable in this browser.';return;}
+    ui.locateRider.disabled=true;ui.locateRider.textContent='Locating…';ui.guidanceTranscript.textContent='Allow location access to start the red route.';
+    locationWatchId=navigator.geolocation.watchPosition(
+      position=>{
+        const previous=riderLocation,now=Date.now();
+        riderLocation={lat:position.coords.latitude,lng:position.coords.longitude};
+        if(!riderMarker)riderMarker=new mapboxgl.Marker({color:'#171716'}).setLngLat([riderLocation.lng,riderLocation.lat]).addTo(guidanceMap);
+        else riderMarker.setLngLat([riderLocation.lng,riderLocation.lat]);
+        ui.locateRider.textContent='Location live';ui.guidanceTranscript.textContent='Red route is following your position.';
+        const moved=!previous||Math.abs(previous.lat-riderLocation.lat)+Math.abs(previous.lng-riderLocation.lng)>.00015;
+        if(moved&&(!previous||now-lastRouteAt>5000)){lastRouteAt=now;renderGuidance(latestGuidance || {trail:[],candidates:{},confidence:0});}
+      },
+      ()=>{if(locationWatchId!==undefined)navigator.geolocation.clearWatch(locationWatchId);locationWatchId=undefined;ui.locateRider.disabled=false;ui.locateRider.textContent='Try location again';ui.guidanceTranscript.textContent='Location was not shared. Tap here to retry.';},
+      {enableHighAccuracy:true,timeout:10000,maximumAge:15000}
+    );
+  }
+  async function startGuidance() {
+    if(isCare || role!=='rider' || guidanceActive)return;
+    guidanceActive=true;ui.guidancePanel.style.display='block';
+    try {
+      const [configResponse,deliveryResponse]=await Promise.all([fetch('/v1/ui/config'),fetch(apiBase)]);
+      if(!configResponse.ok || !deliveryResponse.ok || !window.mapboxgl)throw new Error('Live map could not load.');
+      const config=await configResponse.json(),deliveryData=await deliveryResponse.json();
+      if(!config.mapbox_public_token)throw new Error('Live map is not configured.');
+      guidanceToken=config.mapbox_public_token;mapboxgl.accessToken=guidanceToken;destination=deliveryData.coarse_location;
+      guidanceMap=new mapboxgl.Map({container:'guidanceMap',style:'mapbox://styles/mapbox/streets-v12',center:[destination.lng,destination.lat],zoom:14});
+      guidanceMap.addControl(new mapboxgl.NavigationControl({showCompass:false}),'top-right');
+      destinationMarker=new mapboxgl.Marker({color:'#e9483f'}).setLngLat([destination.lng,destination.lat]).addTo(guidanceMap);
+      guidanceMapReady=new Promise(resolve=>guidanceMap.once('load',()=>{ensureRouteLayers();resolve();}));
+      openGuidanceStream();pollGuidance();locateRider();
+    } catch(error) { ui.guidanceTitle.textContent='Destination unavailable';ui.guidanceInstruction.textContent=error.message;ui.guidanceTranscript.textContent='The audio call can continue.'; }
+  }
+  function stopGuidance() {
+    guidanceActive=false;guidanceSocket?.close();guidanceSocket=null;clearInterval(guidancePollTimer);guidancePollTimer=null;if(locationWatchId!==undefined)navigator.geolocation.clearWatch(locationWatchId);locationWatchId=undefined;
+  }
+  ui.locateRider.addEventListener('click',locateRider);
+  async function join() {
+    if (joined) return leave();
+    if (!role || !access || !(role in roleNames)) return fail('This call link is incomplete. Ask for a new Waymark link.');
+    if (!sdk) return fail('The secure call service could not load. Check your connection and try again.');
+    ui.primary.disabled=true; ui.error.style.display='none'; setStatus('Connecting…','Securing the audio room.');
+    try {
+      const query=new URLSearchParams({role});
+      const response=await fetch(`${apiBase}/webrtc/join?${query}`,{method:'POST',headers:{Authorization:`Bearer ${access}`}});
+      if (!response.ok) throw new Error((await response.json()).detail || 'Call setup failed');
+      const session=await response.json(); ui.notice.textContent=session.disclosure+' No video is used.';
+      call=sdk.createCallObject({videoSource:false,audioSource:true});
+      call.on('track-started', event => { if(event.participant?.local && event.track?.kind==='audio') captureLocalTrack(event.track,session.audio_websocket_url); else if(event.track?.kind==='audio') syncRemoteAudio(event.participant,event.track); });
+      call.on('track-stopped', event => { if(!event.participant?.local) removeRemoteAudio(event.track); });
+      call.on('participant-joined', event => { syncRemoteAudio(event.participant); refreshPeople(); });
+      call.on('participant-updated', event => { syncRemoteAudio(event.participant); refreshPeople(); });
+      call.on('participant-left', () => { removeRemoteAudio(); refreshPeople(); });
+      call.on('network-quality-change', event => { if(event.threshold==='very-low') ui.detail.textContent='Weak connection — stay close to your signal.'; });
+      call.on('error', event => fail(event.errorMsg || 'The audio call was interrupted.'));
+      await call.join({url:session.room_url,token:session.meeting_token,userName:roleNames[role]||'Participant'});
+      joined=true; document.body.classList.add('in-call'); ui.primary.disabled=false; ui.primary.textContent='End call'; ui.primary.classList.add('hangup'); ui.mute.disabled=false; ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; ui.micState.textContent='Mic live'; setStatus('Call connected',isCare?'Speak naturally. Waymark can answer and act.':'Speak naturally. Waymark is listening for landmarks.',true); syncAllRemoteAudio();
+      flushTimer=setInterval(()=>{if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('flush');},3000);
+      if(isCare) { ui.assistantPanel.style.display='block'; pollTimer=setInterval(pollCare,2500); pollCare(); }
+      else startGuidance();
+      const local=Object.values(call.participants()).find(p=>p.local); const track=local?.tracks?.audio?.persistentTrack || local?.audioTrack; if(track) captureLocalTrack(track,session.audio_websocket_url);
+    } catch(error) { setStatus('Could not connect','Check the link or your network and try again.'); fail(error.message); }
+  }
+  async function leave() {
+    ui.primary.disabled=true;
+    clearInterval(flushTimer); clearInterval(pollTimer); stopGuidance();
+    try { if(audioSocket?.readyState===WebSocket.OPEN) audioSocket.send('stop'); audioSocket?.close(); audioProcessor?.disconnect(); await audioContext?.close(); await call?.leave(); call?.destroy(); } catch(_) {}
+    joined=false; ui.primary.disabled=false; ui.primary.textContent='Call ended'; ui.primary.classList.remove('hangup'); ui.primary.disabled=true; ui.mute.disabled=true; setStatus('Call ended','You can close this page.');
+  }
+  ui.primary.addEventListener('click',join);
+  ui.sound.addEventListener('click',async()=>{ const players=[...document.querySelectorAll('audio[data-remote="true"]')]; await Promise.allSettled(players.map(player=>startRemotePlayback(player))); });
+  ui.mute.addEventListener('click',async()=>{ muted=!muted; await call.setLocalAudio(!muted); ui.micState.textContent=muted?'Muted':'Mic live'; ui.mute.textContent=muted?'Unmute':'Mute'; ui.mute.setAttribute('aria-label',muted?'Unmute microphone':'Mute microphone'); });
+  addEventListener('pagehide',()=>{ if(joined) leave(); });
+  if (role) { ui.roleLabel.textContent=isCare?'Shared action call':(role==='rider'?'Rider direction line':'Customer direction line'); ui.you.textContent=roleNames[role]||'Participant'; }
+})();
+</script>
+</body>
+</html>
