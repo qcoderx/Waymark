@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import struct
 import sys
+import time
 import wave
 from pathlib import Path
 
@@ -64,6 +65,34 @@ SCENARIOS = {
             ("customer", "Please open a support case for the stolen phone."),
         ],
     },
+    "business": {
+        "voices": {
+            "employee": {
+                "voice_language": "en",
+                "voice_accent": "yoruba",
+                "voice_gender": "female",
+            },
+            "counterparty": {
+                "voice_language": "en",
+                "voice_accent": "igbo",
+                "voice_gender": "male",
+            },
+        },
+        "turns": [
+            ("employee", "Bello Creative Studio is the seller."),
+            ("counterparty", "Buyer is Kemi Bello."),
+            ("employee", "One complete website design."),
+            (
+                "counterparty",
+                "Price is zero point three five million Nigerian naira.",
+            ),
+            ("employee", "There is no due date."),
+            (
+                "counterparty",
+                "Waymark, generate and share the billing document now.",
+            ),
+        ],
+    },
 }
 
 
@@ -74,19 +103,26 @@ def synthesize(
     text: str,
     target: Path,
 ) -> None:
-    response = client.post(
-        TTS_URL,
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={"text": text, **voice, "output_audio_format": "wav"},
-    )
-    response.raise_for_status()
-    payload = response.json()
-    audio_url = payload.get("data", {}).get("audio_path")
-    if not audio_url:
-        raise RuntimeError(f"Sahara did not return audio: {payload}")
-    audio_response = client.get(audio_url.replace("http://", "https://", 1))
-    audio_response.raise_for_status()
-    target.write_bytes(audio_response.content)
+    for attempt in range(4):
+        try:
+            response = client.post(
+                TTS_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"text": text, **voice, "output_audio_format": "wav"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            audio_url = payload.get("data", {}).get("audio_path")
+            if not audio_url:
+                raise RuntimeError(f"Sahara did not return audio: {payload}")
+            audio_response = client.get(audio_url.replace("http://", "https://", 1))
+            audio_response.raise_for_status()
+            target.write_bytes(audio_response.content)
+            return
+        except httpx.HTTPError:
+            if attempt == 3:
+                raise
+            time.sleep(3)
 
 
 def read_wav(path: Path) -> tuple[wave._wave_params, bytes]:
@@ -116,10 +152,18 @@ def generate_scenario(
 ) -> dict:
     scenario_out = OUT / name
     scenario_out.mkdir(parents=True, exist_ok=True)
+    manifest_path = scenario_out / "manifest.json"
+    previous_turns: dict[int, str] = {}
+    if manifest_path.exists():
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        previous_turns = {
+            index: turn.get("text", "")
+            for index, turn in enumerate(previous.get("turns", []), start=1)
+        }
     clips = []
     for index, (role, text) in enumerate(scenario["turns"], start=1):
         path = scenario_out / f"{index:02d}-{role}.wav"
-        if not path.exists():
+        if not path.exists() or previous_turns.get(index) != text:
             synthesize(client, api_key, scenario["voices"][role], text, path)
         params, frames = read_wav(path)
         clips.append(
@@ -149,16 +193,17 @@ def generate_scenario(
         cursor += clip["duration"] + 1.8
     # Keep enough trailing silence that Chrome does not loop the fake microphone
     # track while the call waits for Waymark's final action response.
-    total_seconds = cursor + 35.0
+    total_seconds = cursor + 70.0
     total_bytes = int(total_seconds * reference.framerate) * reference.sampwidth
-    tracks = {role: bytearray(total_bytes) for role in ("agent", "customer")}
+    roles = tuple(scenario["voices"])
+    tracks = {role: bytearray(total_bytes) for role in roles}
     for clip in clips:
         start = int(clip["start"] * reference.framerate) * reference.sampwidth
         tracks[clip["role"]][start : start + len(clip["frames"])] = clip["frames"]
 
     for role, frames in tracks.items():
         write_wav(scenario_out / f"{name}-demo-{role}.wav", reference, bytes(frames))
-    conversation = mix_pcm16(bytes(tracks["agent"]), bytes(tracks["customer"]))
+    conversation = mix_pcm16(bytes(tracks[roles[0]]), bytes(tracks[roles[1]]))
     write_wav(scenario_out / f"{name}-demo-conversation.wav", reference, conversation)
 
     manifest = {
@@ -178,9 +223,7 @@ def generate_scenario(
             for clip in clips
         ],
     }
-    (scenario_out / "manifest.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
 
 

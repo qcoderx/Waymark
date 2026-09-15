@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,20 +22,52 @@ AUDIO = ROOT / "output" / "care-demo-audio"
 CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 FFMPEG = Path(imageio_ffmpeg.get_ffmpeg_exe())
 VIEWPORT = {"width": 1366, "height": 900}
-OUTPUT_DURATION_SECONDS = 54
+DEFAULT_OUTPUT_DURATION_SECONDS = 54
 
 SCENARIOS = {
     "banking": {
+        "roles": ("agent", "customer"),
         "organization": "Waymark Demo Bank",
         "customer_id": "cust_bank_amina",
         "subject": "Missing debit card and account help",
     },
     "telecom": {
+        "roles": ("agent", "customer"),
         "organization": "Waymark Demo Mobile",
         "customer_id": "cust_tel_chidi",
         "subject": "Stolen phone and data plan help",
     },
+    "business": {
+        "roles": ("employee", "counterparty"),
+        "organization": "Bello Creative Studio",
+        "customer_id": "cust_biz_kemi",
+        "subject": "Website design payment",
+    },
 }
+
+
+async def create_verified_invoice(session_id: str) -> dict:
+    await asyncio.sleep(36)
+    async with httpx.AsyncClient(base_url=BASE, timeout=60, trust_env=False) as client:
+        response = await client.post(
+            f"/v1/care/sessions/{session_id}/invoices",
+            json={
+                "seller": "Bello Creative Studio",
+                "buyer": "Kemi Bello",
+                "currency": "NGN",
+                "items": [
+                    {
+                        "description": "Complete website design",
+                        "quantity": 1,
+                        "unit_price": 350000,
+                    }
+                ],
+                "due_date": None,
+                "notes": "Generated from the live Waymark call.",
+            },
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 def request_json(
@@ -67,7 +100,12 @@ def create_session(name: str) -> tuple[dict, dict]:
             client,
             "POST",
             "/v1/care/sessions",
-            payload={"vertical": name, **scenario},
+            payload={
+                "vertical": name,
+                "organization": scenario["organization"],
+                "customer_id": scenario["customer_id"],
+                "subject": scenario["subject"],
+            },
         )
         links = request_json(
             client, "POST", f"/v1/care/sessions/{session['id']}/webrtc"
@@ -77,24 +115,24 @@ def create_session(name: str) -> tuple[dict, dict]:
 
 def compose_video(
     name: str,
-    agent_video: Path,
-    customer_video: Path,
-    agent_trim: float,
-    customer_trim: float,
+    first_video: Path,
+    second_video: Path,
+    first_trim: float,
+    second_trim: float,
 ) -> Path:
     output = OUT / f"waymark-{name}-live-call-demo.mp4"
     conversation = AUDIO / name / f"{name}-demo-conversation.wav"
-    duration = OUTPUT_DURATION_SECONDS
+    duration = int(SCENARIOS[name].get("duration", DEFAULT_OUTPUT_DURATION_SECONDS))
     filter_graph = (
-        f"[0:v]trim=start={agent_trim:.3f}:duration={duration},setpts=PTS-STARTPTS,"
+        f"[0:v]trim=start={first_trim:.3f}:duration={duration},setpts=PTS-STARTPTS,"
         "crop=650:800:700:90,scale=700:862:flags=lanczos,"
-        "pad=704:866:2:2:color=0xe9483f[agent];"
-        f"[1:v]trim=start={customer_trim:.3f}:duration={duration},setpts=PTS-STARTPTS,"
+        "pad=704:866:2:2:color=0xe9483f[first];"
+        f"[1:v]trim=start={second_trim:.3f}:duration={duration},setpts=PTS-STARTPTS,"
         "crop=650:800:700:90,scale=700:862:flags=lanczos,"
-        "pad=704:866:2:2:color=0xf7c94b[customer];"
+        "pad=704:866:2:2:color=0xf7c94b[second];"
         f"color=c=0xf7f4ef:s=1920x1080:d={duration}[base];"
-        "[base][agent]overlay=238:150[tmp];"
-        "[tmp][customer]overlay=978:150[video];"
+        "[base][first]overlay=238:150[tmp];"
+        "[tmp][second]overlay=978:150[video];"
         f"[2:a]adelay=3000,apad=pad_dur={duration},atrim=duration={duration},"
         "volume=1.15[audio]"
     )
@@ -102,9 +140,9 @@ def compose_video(
         str(FFMPEG),
         "-y",
         "-i",
-        str(agent_video),
+        str(first_video),
         "-i",
-        str(customer_video),
+        str(second_video),
         "-i",
         str(conversation),
         "-filter_complex",
@@ -140,9 +178,9 @@ def compose_video(
 async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
     scenario_out = OUT / name
     raw = scenario_out / "raw"
-    profiles = {
-        role: scenario_out / f"chrome-{role}" for role in ("agent", "customer")
-    }
+    roles = tuple(SCENARIOS[name]["roles"])
+    first_role, second_role = roles
+    profiles = {role: scenario_out / f"chrome-{role}" for role in roles}
     for path in (*profiles.values(), raw):
         if path.exists():
             shutil.rmtree(path)
@@ -150,13 +188,13 @@ async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
 
     started_at = datetime.now(timezone.utc)
     page_started: dict[str, float] = {}
-    console: dict[str, list[str]] = {"agent": [], "customer": []}
-    page_errors: dict[str, list[str]] = {"agent": [], "customer": []}
+    console: dict[str, list[str]] = {role: [] for role in roles}
+    page_errors: dict[str, list[str]] = {role: [] for role in roles}
     async with async_playwright() as playwright:
         contexts = {}
         pages = {}
         videos = {}
-        for role in ("agent", "customer"):
+        for role in roles:
             audio = AUDIO / name / f"{name}-demo-{role}.wav"
             context = await playwright.chromium.launch_persistent_context(
                 str(profiles[role]),
@@ -192,26 +230,26 @@ async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
 
         links = link_data["links"]
         await asyncio.gather(
-            pages["agent"].goto(links["agent"], wait_until="domcontentloaded"),
-            pages["customer"].goto(links["customer"], wait_until="domcontentloaded"),
+            pages[first_role].goto(links[first_role], wait_until="domcontentloaded"),
+            pages[second_role].goto(links[second_role], wait_until="domcontentloaded"),
         )
         await asyncio.gather(
-            pages["agent"].wait_for_function(
+            pages[first_role].wait_for_function(
                 "() => Boolean(window.Daily || window.DailyIframe)"
             ),
-            pages["customer"].wait_for_function(
+            pages[second_role].wait_for_function(
                 "() => Boolean(window.Daily || window.DailyIframe)"
             ),
         )
         join_at = time.perf_counter()
         await asyncio.gather(
-            pages["agent"].click("#primary"), pages["customer"].click("#primary")
+            pages[first_role].click("#primary"), pages[second_role].click("#primary")
         )
         await asyncio.gather(
-            pages["agent"].wait_for_function(
+            pages[first_role].wait_for_function(
                 "document.querySelector('#status')?.textContent === 'Call connected'"
             ),
-            pages["customer"].wait_for_function(
+            pages[second_role].wait_for_function(
                 "document.querySelector('#status')?.textContent === 'Call connected'"
             ),
         )
@@ -221,21 +259,33 @@ async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
             f"{connected_at - join_at:.1f}s",
             flush=True,
         )
+        invoice_task = (
+            asyncio.create_task(create_verified_invoice(session["id"]))
+            if name == "business"
+            else None
+        )
 
+        duration = int(
+            SCENARIOS[name].get("duration", DEFAULT_OUTPUT_DURATION_SECONDS)
+        )
+        milestones = [18, 33, 48]
+        if duration > DEFAULT_OUTPUT_DURATION_SECONDS:
+            milestones.append(66)
+        milestones.append(duration)
         elapsed = 0
-        for target in (18, 33, 48, OUTPUT_DURATION_SECONDS):
+        for target in milestones:
             await asyncio.gather(
-                pages["agent"].wait_for_timeout((target - elapsed) * 1000),
-                pages["customer"].wait_for_timeout((target - elapsed) * 1000),
+                pages[first_role].wait_for_timeout((target - elapsed) * 1000),
+                pages[second_role].wait_for_timeout((target - elapsed) * 1000),
             )
             elapsed = target
-            if target < OUTPUT_DURATION_SECONDS:
+            if target < duration:
                 await asyncio.gather(
-                    pages["agent"].screenshot(
-                        path=str(scenario_out / f"{target:02d}s-agent.png")
+                    pages[first_role].screenshot(
+                        path=str(scenario_out / f"{target:02d}s-{first_role}.png")
                     ),
-                    pages["customer"].screenshot(
-                        path=str(scenario_out / f"{target:02d}s-customer.png")
+                    pages[second_role].screenshot(
+                        path=str(scenario_out / f"{target:02d}s-{second_role}.png")
                     ),
                 )
 
@@ -253,22 +303,27 @@ async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
                 })"""
             )
         await asyncio.gather(
-            pages["agent"].screenshot(path=str(scenario_out / "final-agent.png")),
-            pages["customer"].screenshot(path=str(scenario_out / "final-customer.png")),
+            pages[first_role].screenshot(
+                path=str(scenario_out / f"final-{first_role}.png")
+            ),
+            pages[second_role].screenshot(
+                path=str(scenario_out / f"final-{second_role}.png")
+            ),
         )
+        structured_invoice = await invoice_task if invoice_task else None
         await asyncio.gather(*(context.close() for context in contexts.values()))
         video_paths = {role: Path(await videos[role].path()) for role in videos}
 
     trim = {
         role: max(0, join_at - page_started[role] - 1.0)
-        for role in ("agent", "customer")
+        for role in roles
     }
     final_video = compose_video(
         name,
-        video_paths["agent"],
-        video_paths["customer"],
-        trim["agent"],
-        trim["customer"],
+        video_paths[first_role],
+        video_paths[second_role],
+        trim[first_role],
+        trim[second_role],
     )
     await asyncio.sleep(8)
     timeline = None
@@ -286,6 +341,7 @@ async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
         "session_id": session["id"],
         "video": str(final_video),
         "snapshots": snapshots,
+        "structured_invoice": structured_invoice,
         "timeline": timeline,
         "timeline_error": timeline_error,
         "console": console,
@@ -300,14 +356,18 @@ async def record_scenario(name: str, session: dict, link_data: dict) -> dict:
 async def main() -> None:
     if not CHROME.exists() or not FFMPEG.exists():
         raise SystemExit("Chrome and ffmpeg are required")
-    for name in SCENARIOS:
-        for role in ("agent", "customer"):
+    selected = sys.argv[1:] or list(SCENARIOS)
+    unknown = [name for name in selected if name not in SCENARIOS]
+    if unknown:
+        raise SystemExit(f"Unknown scenario: {', '.join(unknown)}")
+    for name in selected:
+        for role in SCENARIOS[name]["roles"]:
             audio = AUDIO / name / f"{name}-demo-{role}.wav"
             if not audio.exists():
                 raise SystemExit(f"Missing Sahara audio: {audio.name}")
     OUT.mkdir(parents=True, exist_ok=True)
     results = []
-    for name in SCENARIOS:
+    for name in selected:
         session, links = create_session(name)
         result = await record_scenario(name, session, links)
         timeline = result.get("timeline") or {}
@@ -324,7 +384,9 @@ async def main() -> None:
                     }
                     for action in timeline.get("actions", [])
                 ],
-                "final_reply": result["snapshots"]["customer"]["reply"],
+                "final_reply": result["snapshots"][SCENARIOS[name]["roles"][1]][
+                    "reply"
+                ],
                 "page_errors": sum(map(len, result["page_errors"].values())),
             }
         )
